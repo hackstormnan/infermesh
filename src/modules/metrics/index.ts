@@ -1,12 +1,28 @@
 /**
  * modules/metrics — Observability & Aggregated Metrics
  *
- * Placeholder module. Future responsibilities:
- *   - Collect and aggregate request throughput, latency, and error rates
- *   - Track per-model and per-worker utilisation counters
- *   - Expose a Prometheus-compatible /metrics scrape endpoint
- *   - Provide time-series snapshots for the simulation module
- *   - Support configurable retention windows and percentile calculations (p50/p95/p99)
+ * Consumes raw metric records emitted by the requests and workers modules,
+ * aggregates them over configurable time windows, and exposes read APIs.
+ *
+ * Depends on shared contracts:
+ *   RequestMetricRecord, WorkerMetricRecord (write models)
+ *   AggregatedMetrics, WorkerSnapshot, ModelSnapshot (read models)
+ *   MetricWindow
+ *
+ * Will expose (future tickets):
+ *   GET /api/v1/metrics/summary          — system-wide aggregated metrics
+ *   GET /api/v1/metrics/workers          — per-worker health snapshots
+ *   GET /api/v1/metrics/models           — per-model utilisation snapshots
+ *   GET /metrics                         — Prometheus-compatible scrape endpoint
  */
 
-export {};
+export type {
+  RequestMetricRecord,
+  WorkerMetricRecord,
+  AggregatedMetrics,
+  WorkerSnapshot,
+  ModelSnapshot,
+  LatencyPercentiles,
+} from "../../shared/contracts/metrics";
+
+export { MetricWindow } from "../../shared/contracts/metrics";

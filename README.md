@@ -31,9 +31,21 @@ src/
 │   ├── logger.ts             # Standalone Pino logger (startup / background)
 │   └── errors.ts             # ApiError class + global Fastify error handler
 │
-├── shared/                   # Shared contracts used across all layers
-│   ├── types.ts              # API response envelope types (ApiSuccessBody, ApiErrorBody)
-│   └── response.ts           # Response builder helpers (successResponse, buildMeta)
+├── shared/                   # Shared contracts — the domain language of InferMesh
+│   ├── index.ts              # Top-level barrel (import from '../../shared')
+│   ├── types.ts              # API envelope: ApiSuccessBody, ApiErrorBody, ResponseMeta
+│   ├── response.ts           # Response builder helpers
+│   ├── primitives.ts         # Branded IDs, IsoTimestamp, PaginationQuery, BaseEntity
+│   └── contracts/            # Domain contracts by bounded context
+│       ├── index.ts          # Contracts barrel
+│       ├── request.ts        # InferenceRequest entity, RequestStatus, DTOs, Zod schemas
+│       ├── job.ts            # Job entity, JobStatus, JobPriority, JobEvent payloads
+│       ├── model.ts          # Model entity, ModelProvider, ModelCapability, DTOs
+│       ├── worker.ts         # Worker entity, WorkerStatus, heartbeat DTOs
+│       ├── routing.ts        # RoutingPolicy, RoutingDecision, RoutingStrategy
+│       ├── metrics.ts        # RequestMetricRecord, AggregatedMetrics, MetricWindow
+│       ├── simulation.ts     # SimulationConfig, SimulationResult, TrafficProfile
+│       └── stream.ts         # StreamEvent discriminated union, StopReason
 │
 ├── infra/                    # Infrastructure-level routes and middleware config
 │   ├── health/
@@ -42,7 +54,7 @@ src/
 │       ├── requestId.ts      # Correlation ID strategy (x-request-id header)
 │       └── requestLogger.ts  # Pino logger configuration + header redaction
 │
-└── modules/                  # Domain modules (placeholders — to be built out)
+└── modules/                  # Domain modules (re-export contracts; impl in future tickets)
     ├── requests/             # Inference request lifecycle management
     ├── workers/              # Worker registry and health tracking
     ├── models/               # Model registry and capability catalog
@@ -50,6 +62,9 @@ src/
     ├── metrics/              # Observability and aggregated metrics
     ├── simulation/           # Load simulation and policy testing
     └── stream/               # Streaming response handling (SSE / WebSocket)
+
+docs/
+└── architecture.md           # Full module map, dependency graph, naming conventions
 ```
 
 ### API Response Envelope
@@ -114,16 +129,25 @@ See [.env.example](.env.example) for all supported variables. Required at runtim
 | `LOG_LEVEL` | `info` | Pino log level |
 | `SERVICE_NAME` | `infermesh` | Service name in logs |
 
+### Shared Contracts
+
+All domain types, enums, DTOs, and Zod schemas live in `src/shared/contracts/` — separate
+from any implementation. Modules import from `shared/`, never from each other, enforcing
+clean boundaries and a stable domain language.
+
+See [docs/architecture.md](docs/architecture.md) for the full module map, dependency graph,
+and naming conventions.
+
 ---
 
 ## Roadmap
 
-Ticket 1 establishes the foundation. Subsequent tickets will implement:
-
-- **Ticket 2** — Model registry with capability metadata
-- **Ticket 3** — Worker registry and health tracking
-- **Ticket 4** — Request ingestion and lifecycle state machine
-- **Ticket 5** — Policy-driven routing engine (pluggable strategies)
-- **Ticket 6** — Metrics aggregation and Prometheus endpoint
-- **Ticket 7** — Streaming proxy (SSE / WebSocket)
-- **Ticket 8** — Load simulation and policy backtesting
+- **Ticket 1** ✅ — Server foundation (Fastify, Pino, Zod config, error handling, health endpoint)
+- **Ticket 2** ✅ — Shared domain contracts (entities, DTOs, enums, Zod schemas for all modules)
+- **Ticket 3** — Model registry implementation (CRUD, alias resolution, capability filtering)
+- **Ticket 4** — Worker registry implementation (registration, heartbeats, health eviction)
+- **Ticket 5** — Request ingestion and state machine
+- **Ticket 6** — Policy-driven routing engine (pluggable strategies, dry-run evaluate endpoint)
+- **Ticket 7** — Metrics aggregation and Prometheus endpoint
+- **Ticket 8** — Streaming proxy (SSE / WebSocket)
+- **Ticket 9** — Load simulation and policy backtesting

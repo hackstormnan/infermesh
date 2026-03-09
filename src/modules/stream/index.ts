@@ -1,12 +1,28 @@
 /**
  * modules/stream — Streaming Response Handling
  *
- * Placeholder module. Future responsibilities:
- *   - Proxy token-by-token streaming responses from model backends to clients
- *   - Support Server-Sent Events (SSE) and WebSocket transports
- *   - Handle backpressure, client disconnects, and partial failure recovery
- *   - Apply streaming-aware rate limiting and token budget enforcement
- *   - Provide structured stream events (token_delta, stop_reason, usage) to metrics
+ * Proxies token-by-token completions from model backends to clients via SSE
+ * or WebSocket. Emits structured StreamEvents consumed by the metrics module.
+ *
+ * Depends on shared contracts:
+ *   StreamEvent (discriminated union of all event types)
+ *   StreamEventType, StopReason, StreamSession
+ *   Individual event shapes: TokenDeltaEvent, UsageReportEvent, StreamErrorEvent, etc.
+ *
+ * Will expose (future tickets):
+ *   GET /api/v1/requests/:id/stream    — SSE endpoint for streaming completions
+ *   WS  /api/v1/requests/:id/ws        — WebSocket alternative
  */
 
-export {};
+export type {
+  StreamEvent,
+  StreamSession,
+  StreamStartedEvent,
+  TokenDeltaEvent,
+  StreamStopEvent,
+  UsageReportEvent,
+  StreamErrorEvent,
+  HeartbeatEvent,
+} from "../../shared/contracts/stream";
+
+export { StreamEventType, StopReason } from "../../shared/contracts/stream";

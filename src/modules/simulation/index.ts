@@ -1,11 +1,33 @@
 /**
- * modules/simulation — Load Simulation & Policy Testing
+ * modules/simulation — Load Simulation & Policy Backtesting
  *
- * Placeholder module. Future responsibilities:
- *   - Generate synthetic inference workloads for policy evaluation
- *   - Replay historical request traces against new routing configurations
- *   - Run what-if analyses on cost / latency trade-offs before applying policies
- *   - Produce deterministic test fixtures used by unit and integration tests
+ * Accepts a SimulationConfig (traffic profile + routing policy + virtual workers),
+ * generates synthetic or replayed workloads, and produces AggregatedMetrics
+ * for policy comparison without touching production infrastructure.
+ *
+ * Depends on shared contracts:
+ *   SimulationConfig, SimulationResult, SimulationDto, CreateSimulationDto
+ *   SimulationStatus, TrafficProfile, SimulatedWorker
+ *   AggregatedMetrics (from metrics contracts — read model)
+ *   RoutingPolicy (from routing contracts — the policy under test)
+ *
+ * Will expose (future tickets):
+ *   POST /api/v1/simulations            — submit a new simulation
+ *   GET  /api/v1/simulations            — list simulations with status filter
+ *   GET  /api/v1/simulations/:id        — status and result
+ *   DELETE /api/v1/simulations/:id      — cancel a running simulation
  */
 
-export {};
+export type {
+  SimulationConfig,
+  SimulationResult,
+  SimulationDto,
+  CreateSimulationDto,
+  TrafficProfile,
+  SimulatedWorker,
+} from "../../shared/contracts/simulation";
+
+export {
+  SimulationStatus,
+  createSimulationSchema,
+} from "../../shared/contracts/simulation";

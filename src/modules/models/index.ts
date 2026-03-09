@@ -1,12 +1,30 @@
 /**
  * modules/models — Model Registry & Capability Catalog
  *
- * Placeholder module. Future responsibilities:
- *   - Maintain a registry of available AI models and their metadata
- *     (provider, context window, cost per token, latency profile, modalities)
- *   - Support model aliasing and versioned references
- *   - Expose lookup APIs used by the routing module during placement
- *   - Eventually: support dynamic model registration and capability negotiation
+ * Owns the catalog of available AI models and their metadata.
+ *
+ * Depends on shared contracts:
+ *   Model, ModelStatus, ModelProvider, ModelCapability, RegisterModelDto
+ *
+ * Will expose (future tickets):
+ *   POST /api/v1/models        — register a new model
+ *   GET  /api/v1/models        — list models with capability/status filters
+ *   GET  /api/v1/models/:id    — single model detail
+ *   PATCH /api/v1/models/:id   — update model status or pricing
+ *   GET  /api/v1/models/resolve/:alias — resolve alias to canonical model ID
  */
 
-export {};
+export type {
+  Model,
+  ModelDto,
+  RegisterModelDto,
+  ModelPricing,
+  ModelLatencyProfile,
+} from "../../shared/contracts/model";
+
+export {
+  ModelStatus,
+  ModelProvider,
+  ModelCapability,
+  registerModelSchema,
+} from "../../shared/contracts/model";

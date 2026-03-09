@@ -1,0 +1,187 @@
+# InferMesh — Architecture Reference
+
+## Overview
+
+InferMesh is a policy-driven AI inference routing backend. It accepts AI inference
+requests, routes them to the most appropriate (model, worker) pair based on
+configurable policies, proxies the response back to the caller, and records
+telemetry for observability and simulation.
+
+---
+
+## Layer Map
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  API Layer  (Fastify routes, request validation, responses) │
+├─────────────────────────────────────────────────────────────┤
+│  Module Layer  (domain business logic — one module per      │
+│  bounded context: requests, workers, models, routing, ...)  │
+├─────────────────────────────────────────────────────────────┤
+│  Shared Layer  (contracts, primitives, API envelope,        │
+│  response helpers — no business logic, no side-effects)     │
+├─────────────────────────────────────────────────────────────┤
+│  Infra Layer  (health, middleware, future: DB, queue, cache) │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Dependencies flow **downward only**. Modules depend on `shared/`; they never
+import from other modules directly. Cross-module communication happens through
+shared contract types and (in future) internal events.
+
+---
+
+## Module Responsibilities
+
+### `modules/requests`
+Entry point for all AI inference workloads.
+- Validates and persists incoming `InferenceRequest` entities
+- Owns the request state machine: `queued → dispatched → streaming → completed | failed | cancelled`
+- Calls the routing module to get a `RoutingDecision`, then creates a `Job`
+- Updates request state based on `JobCompletedEvent`s
+
+### `modules/workers`
+The registry of inference executors.
+- Accepts worker self-registration and periodic heartbeats
+- Maintains real-time `WorkerCapacity` (activeJobs, queuedJobs, maxConcurrent)
+- Marks workers `unhealthy` when heartbeat deadlines are missed
+- Exposes worker state to the routing module for placement scoring
+
+### `modules/models`
+The catalog of available AI models.
+- Maintains model metadata: provider, context window, pricing, latency profile, capabilities
+- Supports model aliases (`claude-sonnet` → `claude-sonnet-4-6`)
+- Controls model lifecycle (`active → deprecated`)
+- Exposes lookup APIs used by the routing engine to score candidates
+
+### `modules/routing`
+The policy-driven placement engine — the core differentiator of InferMesh.
+- Maintains named `RoutingPolicy` configurations (strategy + constraints)
+- On each request, queries workers and models, scores all (model, worker) candidates
+- Returns a `RoutingDecision` with the winning candidate and a full audit trail
+- Supports pluggable strategies: round-robin, least-loaded, cost-optimised, latency-optimised, affinity, canary
+
+### `modules/metrics`
+Observability and aggregated telemetry.
+- Consumes `RequestMetricRecord` and `WorkerMetricRecord` write events
+- Aggregates them over configurable `MetricWindow`s into `AggregatedMetrics`
+- Exposes Prometheus-compatible scrape endpoint and JSON read APIs
+- Provides `ModelSnapshot` and `WorkerSnapshot` for dashboards and simulation
+
+### `modules/simulation`
+Load testing and policy backtesting without real infrastructure.
+- Accepts a `SimulationConfig` (traffic profile + routing policy + virtual workers)
+- Generates synthetic requests via a Poisson arrival process, or replays recorded traces
+- Runs the routing engine against the virtual worker pool
+- Produces `AggregatedMetrics` for comparison across policy configurations
+
+### `modules/stream`
+Token-by-token streaming response proxy.
+- Establishes connections to model backends that support streaming
+- Emits `StreamEvent` payloads (delta, stop, usage, error) to the caller over SSE or WebSocket
+- Handles backpressure, client disconnects, and timeout
+- Reports `UsageReportEvent` to the metrics module on stream close
+
+---
+
+## Shared Contracts (`src/shared/`)
+
+### Why shared contracts are separate from implementation
+
+Shared contracts define the **domain language** of InferMesh. They are the nouns
+and verbs every module speaks — without any business logic attached.
+
+**Separating contracts from implementation provides:**
+
+1. **Stable import targets** — Modules import `InferenceRequest` from `shared/contracts`,
+   not from each other. Refactoring one module's internals never breaks another.
+
+2. **Enforced boundaries** — A module that only imports from `shared/` cannot
+   accidentally call another module's internal functions, which would create hidden coupling.
+
+3. **Single source of truth** — `RequestStatus.Completed` is defined once and means
+   the same thing to the requests module, the routing module, the metrics module, and
+   the simulation module.
+
+4. **Testability** — Tests can construct any domain object using contract types
+   without importing any implementation — no side-effects, no circular dependencies.
+
+5. **Documentation by design** — The contracts file is the first place a new contributor
+   reads to understand a domain concept. Types, enums, and Zod schemas at the top level
+   are more discoverable than types scattered across service files.
+
+### What lives in `shared/`
+
+| File / Folder | Contents |
+|---|---|
+| `types.ts` | API response envelope: `ApiSuccessBody`, `ApiErrorBody`, `ResponseMeta` |
+| `response.ts` | Response builder helpers: `successResponse()`, `buildMeta()` |
+| `primitives.ts` | Branded ID types, `IsoTimestamp`, `PaginationQuery`, `PaginatedResponse`, `BaseEntity` |
+| `contracts/request.ts` | `InferenceRequest`, `RequestStatus`, `CreateInferenceRequestDto`, Zod schemas |
+| `contracts/job.ts` | `Job`, `JobStatus`, `JobPriority`, `JobEvent` payloads |
+| `contracts/model.ts` | `Model`, `ModelStatus`, `ModelProvider`, `ModelCapability`, `RegisterModelDto` |
+| `contracts/worker.ts` | `Worker`, `WorkerStatus`, `RegisterWorkerDto`, `WorkerHeartbeatDto` |
+| `contracts/routing.ts` | `RoutingPolicy`, `RoutingDecision`, `RoutingStrategy`, `RoutingConstraints` |
+| `contracts/metrics.ts` | `RequestMetricRecord`, `WorkerMetricRecord`, `AggregatedMetrics`, `MetricWindow` |
+| `contracts/simulation.ts` | `SimulationConfig`, `SimulationResult`, `TrafficProfile`, `SimulatedWorker` |
+| `contracts/stream.ts` | `StreamEvent` discriminated union, `StreamSession`, `StopReason` |
+
+### What does NOT live in `shared/`
+
+- Business logic (service functions, state machines, algorithms)
+- Repository / database access
+- HTTP route handlers
+- Module-private types used only within one module
+- Infrastructure concerns (queues, caches, external clients)
+
+---
+
+## Module Dependency Graph
+
+```
+                        ┌─────────────┐
+                        │   requests  │
+                        └──────┬──────┘
+                               │ creates Job via
+                               ▼
+          ┌──────────┐   ┌─────────────┐   ┌─────────┐
+          │  models  │◄──│   routing   │──►│ workers │
+          └──────────┘   └──────┬──────┘   └────┬────┘
+                                │               │
+                         decisions          heartbeats
+                                │               │
+                         ┌──────▼───────────────▼──────┐
+                         │           metrics            │
+                         └──────────────────────────────┘
+                                        │
+                                 snapshots for
+                                        │
+                         ┌──────────────▼──────────────┐
+                         │          simulation          │
+                         └─────────────────────────────┘
+
+          ┌───────────────────────────────────────────┐
+          │                  stream                   │
+          │  (reads: requests, workers, models)        │
+          │  (writes: UsageReportEvent → metrics)      │
+          └───────────────────────────────────────────┘
+
+          ═══════════════════════════════════════════
+          All arrows pass through shared/contracts —
+          no module imports from another module's src
+          ═══════════════════════════════════════════
+```
+
+---
+
+## Naming Conventions
+
+| Pattern | Example | Meaning |
+|---|---|---|
+| `FooEntity` / `Foo` | `InferenceRequest`, `Worker` | Internal domain entity |
+| `FooDto` | `InferenceRequestDto`, `WorkerDto` | API response projection |
+| `CreateFooDto` | `CreateInferenceRequestDto` | Validated API input (from Zod) |
+| `FooEvent` | `JobDispatchedEvent`, `TokenDeltaEvent` | Internal or stream event payload |
+| `FooStatus` | `RequestStatus`, `WorkerStatus` | State machine enum |
+| `FooSchema` | `createInferenceRequestSchema` | Zod schema for runtime validation |
+| `FooId` | `RequestId`, `WorkerId` | Branded ID type |
