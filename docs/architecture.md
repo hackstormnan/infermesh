@@ -226,3 +226,41 @@ Separating entity from DTO means internal fields can be added without affecting 
 connected to `POST /requests` in Ticket 6, once the intake pipeline (queueing, routing,
 worker dispatch) is in place. The entity model already carries optional `jobId`,
 `tokensIn`, `tokensOut`, `firstTokenAt`, and `completedAt` for downstream linkage.
+
+---
+
+## Models Module — Internal Structure
+
+```
+src/modules/models/
+  queries.ts                         — ListModelsQuery (status, provider, capability, qualityTier, name prefix)
+  repository/
+    IModelRepository.ts              — repository port (interface)
+    InMemoryModelRepository.ts       — dual-index Map adapter (byId + byName)
+  service/
+    models.service.ts                — service layer; owns business logic + toDto mapper
+  routes/
+    models.route.ts                  — buildModelsRoute factory (read-only)
+  index.ts                           — public barrel; wires repo → service → route
+```
+
+### Extended model metadata (added in Ticket 5)
+
+The shared `Model` entity was extended with four routing-relevant fields:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `version` | `string?` | Provider model version string |
+| `maxOutputTokens` | `number` | Max completion tokens; separate from `contextWindow` |
+| `qualityTier` | `QualityTier` enum | Frontier / Standard / Economy — used by quality-aware routing strategies |
+| `supportedTasks` | `ModelTask[]` | Task types the model excels at — used for task-aware routing |
+
+### Design decisions
+
+**Dual name index** — `InMemoryModelRepository` maintains a secondary `byName` Map alongside the primary `byId` Map. This gives O(1) alias resolution without scanning, which the routing engine will call on every request.
+
+**Name uniqueness enforced in the service** — The repository is kept simple (no deduplication logic). Conflict detection happens in `ModelsService.register()` before the entity is persisted, following the same "service owns business rules" pattern as the requests module.
+
+**`metadata` excluded from ModelDto** — The `metadata` field (provider-specific configuration) is intentionally omitted from the API response. It may contain API keys, internal routing hints, or other fields not safe to expose to callers.
+
+**Write routes deferred** — `register()` and `update()` are implemented in the service and ready to connect. `POST /models` and `PATCH /models/:id` will be wired in a later ticket alongside admin authentication guards.
