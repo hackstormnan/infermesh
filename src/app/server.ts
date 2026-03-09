@@ -5,62 +5,53 @@
  *
  * Responsibilities:
  *   - Create and configure the Fastify instance
- *   - Wire up global plugins (request ID, error handler, logging)
+ *   - Register global infrastructure plugins (context, request ID)
+ *   - Wire error and not-found handlers
  *   - Delegate route registration to app/routes.ts
  *
- * Keeping this as a factory function (not a singleton) makes the server
- * fully testable — tests can call buildServer() without side-effects.
+ * Keeping this as a factory function (not a module-level singleton) ensures
+ * each test can spin up its own isolated server with no shared state.
  *
  * ─── Why Fastify? ────────────────────────────────────────────────────────────
- * InferMesh will handle high-throughput AI inference requests. Fastify is
- * 2-3x faster than Express in benchmarks, ships with structured Pino logging
- * out of the box, has a clean plugin/lifecycle model for modular architecture,
- * and provides native TypeScript types. These properties make it the right
- * foundation for a latency-sensitive, modular inference router.
+ * InferMesh routes high-throughput AI inference traffic. Fastify is 2-3× faster
+ * than Express in benchmarks, ships Pino logging out of the box, has a clean
+ * plugin lifecycle for modular architecture, and provides native TypeScript types.
  */
 
 import Fastify from "fastify";
 import { config } from "../core/config";
-import { errorHandler } from "../core/errors";
+import { contextPlugin } from "../core/context";
+import { errorHandler, notFoundHandler } from "../core/errors";
 import { buildLoggerConfig } from "../infra/middleware/requestLogger";
 import { echoRequestIdHook, genReqId } from "../infra/middleware/requestId";
 import { registerRoutes } from "./routes";
 
 export async function buildServer() {
   const fastify = Fastify({
-    // Pino logger — config built in requestLogger.ts
-    logger: buildLoggerConfig(config.NODE_ENV, config.LOG_LEVEL),
+    logger: buildLoggerConfig(config.logging.pretty, config.logging.level),
 
-    // Request ID: honour inbound x-request-id header or generate a UUID
+    // Request ID: honour inbound x-request-id header or generate a UUID v4
     genReqId,
     requestIdHeader: "x-request-id",
     requestIdLogLabel: "requestId",
 
-    // Discard trailing slashes (e.g. /health/ → /health)
+    // Treat /foo/ and /foo as the same route
     routerOptions: { ignoreTrailingSlash: true },
+
+    // Cap request body size to configured limit
+    bodyLimit: config.server.bodyLimitBytes,
   });
 
-  // ── Global hooks ──────────────────────────────────────────────────────────
-  // Echo the resolved request ID back to the caller as a response header
+  // ── Global plugins ────────────────────────────────────────────────────────
+  // RequestContext decorator — must be registered before routes
+  await fastify.register(contextPlugin);
+
+  // Echo resolved request ID back as a response header for client correlation
   await echoRequestIdHook(fastify);
 
-  // ── Global error handler ──────────────────────────────────────────────────
+  // ── Error handling ────────────────────────────────────────────────────────
   fastify.setErrorHandler(errorHandler);
-
-  // ── 404 handler ───────────────────────────────────────────────────────────
-  fastify.setNotFoundHandler((request, reply) => {
-    reply.status(404).send({
-      success: false,
-      error: {
-        code: "NOT_FOUND",
-        message: `Route ${request.method} ${request.url} not found`,
-      },
-      meta: {
-        requestId: request.id,
-        timestamp: new Date().toISOString(),
-      },
-    });
-  });
+  fastify.setNotFoundHandler(notFoundHandler);
 
   // ── Routes ────────────────────────────────────────────────────────────────
   await registerRoutes(fastify);

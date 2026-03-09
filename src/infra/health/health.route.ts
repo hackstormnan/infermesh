@@ -3,9 +3,9 @@
  *
  * GET /health — liveness probe endpoint.
  *
- * Intentionally lightweight: no DB pings, no dependency checks.
- * Readiness checks (dependency health) will be added as a separate
- * endpoint once infrastructure modules are wired up.
+ * Intentionally lightweight: no downstream pings, no dependency checks.
+ * Readiness checks (model registry, worker registry reachable, etc.) will be
+ * added as a separate GET /ready endpoint once those modules are implemented.
  */
 
 import type { FastifyPluginAsync } from "fastify";
@@ -56,9 +56,9 @@ export const healthRoute: FastifyPluginAsync = async (fastify) => {
       return successResponse<HealthData>(
         {
           status: "ok",
-          service: config.SERVICE_NAME,
-          version: config.SERVICE_VERSION,
-          environment: config.NODE_ENV,
+          service: config.service.name,
+          version: config.service.version,
+          environment: config.env,
           uptime: Math.floor(process.uptime()),
         },
         buildMeta(request.id as string),
