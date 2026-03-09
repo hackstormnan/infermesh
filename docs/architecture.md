@@ -185,3 +185,44 @@ and verbs every module speaks — without any business logic attached.
 | `FooStatus` | `RequestStatus`, `WorkerStatus` | State machine enum |
 | `FooSchema` | `createInferenceRequestSchema` | Zod schema for runtime validation |
 | `FooId` | `RequestId`, `WorkerId` | Branded ID type |
+
+---
+
+## Requests Module — Internal Structure
+
+```
+src/modules/requests/
+  queries.ts                         — ListRequestsQuery Zod schema + type
+  repository/
+    IRequestRepository.ts            — repository port (interface)
+    InMemoryRequestRepository.ts     — in-memory adapter (development / tests)
+  service/
+    requests.service.ts              — service layer; owns business logic
+  routes/
+    requests.route.ts                — Fastify plugin factory (read-only routes)
+  index.ts                           — public barrel; wires repo → service → route
+```
+
+### Design decisions
+
+**Repository port pattern** — `RequestsService` depends on `IRequestRepository`, not the
+concrete `InMemoryRequestRepository`. Swapping in a Postgres/Redis adapter requires only
+changing the binding in `index.ts`.
+
+**Service as the only access point** — Route handlers call `service.getById()` and
+`service.list()`; they never import the repository. This keeps HTTP concerns (parsing,
+status codes, serialization) fully separate from persistence concerns.
+
+**Zod at the route boundary** — Query string params are coerced and validated by
+`listRequestsQuerySchema.parse()` inside the handler. Fastify schema (JSON Schema) is
+defined for OpenAPI / fast-json-stringify compatibility; Zod provides the richer enum
+validation and `coerce` behaviour for page/limit.
+
+**Mapper function** — `toDto()` is a pure function co-located with the service that
+projects the internal `InferenceRequest` entity to the public `InferenceRequestDto`.
+Separating entity from DTO means internal fields can be added without affecting the API.
+
+**Future extension points** — `RequestsService.create()` is implemented and ready to be
+connected to `POST /requests` in Ticket 6, once the intake pipeline (queueing, routing,
+worker dispatch) is in place. The entity model already carries optional `jobId`,
+`tokensIn`, `tokensOut`, `firstTokenAt`, and `completedAt` for downstream linkage.

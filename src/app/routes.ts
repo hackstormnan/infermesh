@@ -11,15 +11,12 @@
 
 import type { FastifyInstance } from "fastify";
 import { healthRoute } from "../infra/health/health.route";
-
-// Future domain route imports will be added here, e.g.:
-// import { requestsRoute } from "../modules/requests";
-// import { modelsRoute }   from "../modules/models";
+import { requestsRoute } from "../modules/requests";
 
 export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // Infrastructure routes (no versioned prefix — used by load balancers / k8s probes)
   await fastify.register(healthRoute);
 
-  // Domain routes will be namespaced under /api/v1 as modules are built out
-  // await fastify.register(requestsRoute, { prefix: "/api/v1" });
+  // Domain routes — versioned under /api/v1
+  await fastify.register(requestsRoute, { prefix: "/api/v1" });
 }
