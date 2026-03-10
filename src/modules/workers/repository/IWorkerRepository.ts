@@ -8,6 +8,7 @@
  * (Redis, Postgres) requires only changing the binding in index.ts.
  *
  * ─── Lookup semantics ────────────────────────────────────────────────────────
+ *   findAll    — all workers (no filtering), used by the registry service
  *   findById   — exact match on the branded WorkerId (UUID)
  *   findByName — case-insensitive match on the worker's display name
  *   list       — paginated, filtered, sorted by name ascending
@@ -25,6 +26,16 @@ import type { ListWorkersQuery } from "../queries";
 export interface IWorkerRepository {
   /** Persist a new worker. The caller must supply a fully-constructed entity. */
   create(worker: Worker): Promise<Worker>;
+
+  /**
+   * Return every registered worker without filtering or pagination.
+   *
+   * Used by the worker registry service to retrieve a complete candidate pool
+   * for eligibility filtering at assignment time. Prefer this over the paginated
+   * `list()` when the caller needs all workers (routing must not silently drop
+   * candidates due to a page boundary).
+   */
+  findAll(): Promise<Worker[]>;
 
   /** Retrieve a worker by its UUID. Returns null if not found. */
   findById(id: WorkerId): Promise<Worker | null>;

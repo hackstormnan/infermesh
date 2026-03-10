@@ -39,3 +39,70 @@ export const listWorkersQuerySchema = paginationQuerySchema.extend({
 });
 
 export type ListWorkersQuery = z.infer<typeof listWorkersQuerySchema>;
+
+// ─── Registry / candidates query ──────────────────────────────────────────────
+
+/**
+ * Query parameters for GET /workers/candidates.
+ *
+ * Maps directly onto WorkerAssignmentFilter for the HTTP boundary.
+ * `status` accepts a single value (maps to `statuses: [status]` internally).
+ * `gpuRequired` is a boolean string ("true"/"false") because query strings
+ * are always text.
+ */
+export const workerCandidatesQuerySchema = z.object({
+  /**
+   * Worker must support this model ID.
+   * e.g. ?modelId=claude-sonnet-4-6
+   */
+  modelId: z.string().optional(),
+
+  /**
+   * Restrict to workers in this region.
+   * e.g. ?region=us-east-1
+   */
+  region: z.string().optional(),
+
+  /**
+   * Restrict by a single lifecycle status.
+   * Defaults to Idle + Busy in the registry service when omitted.
+   * e.g. ?status=idle
+   */
+  status: z.nativeEnum(WorkerStatus).optional(),
+
+  /**
+   * Worker's queued jobs must be ≤ this value.
+   * e.g. ?maxQueueSize=3
+   */
+  maxQueueSize: z.coerce.number().int().nonnegative().optional(),
+
+  /**
+   * Worker's load score must be ≤ this value (0.0–1.0).
+   * Workers without a reported load score always pass.
+   * e.g. ?maxLoadScore=0.7
+   */
+  maxLoadScore: z.coerce.number().min(0).max(1).optional(),
+
+  /**
+   * Worker must have sent a heartbeat within this many seconds.
+   * e.g. ?minHeartbeatFreshnessSecs=30
+   */
+  minHeartbeatFreshnessSecs: z.coerce.number().int().positive().optional(),
+
+  /**
+   * When "true", only GPU-accelerated workers are returned.
+   * e.g. ?gpuRequired=true
+   */
+  gpuRequired: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .optional(),
+
+  /**
+   * Restrict by exact instance type.
+   * e.g. ?instanceType=g4dn.xlarge
+   */
+  instanceType: z.string().optional(),
+});
+
+export type WorkerCandidatesQuery = z.infer<typeof workerCandidatesQuerySchema>;

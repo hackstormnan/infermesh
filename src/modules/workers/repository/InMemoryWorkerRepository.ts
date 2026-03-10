@@ -28,6 +28,10 @@ export class InMemoryWorkerRepository implements IWorkerRepository {
     return worker;
   }
 
+  async findAll(): Promise<Worker[]> {
+    return Array.from(this.byId.values());
+  }
+
   async findById(id: WorkerId): Promise<Worker | null> {
     return this.byId.get(id) ?? null;
   }
