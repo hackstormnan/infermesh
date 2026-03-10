@@ -311,3 +311,64 @@ The shared `Worker` entity was extended with two new value objects:
 **Name uniqueness enforced in the service** — Same pattern as the models module: conflict detection happens before persistence so the repository stays simple.
 
 **Write routes deferred** — `register()`, `heartbeat()`, and `deregister()` are implemented in the service. `POST /workers`, `POST /workers/:id/heartbeat`, and `DELETE /workers/:id` will be wired in Ticket 8 alongside heartbeat eviction.
+
+---
+
+## Routing Module — Internal Structure
+
+```
+src/modules/routing/
+  queries.ts                         — ListPoliciesQuery + ListDecisionsQuery
+  repository/
+    IPolicyRepository.ts             — mutable CRUD port for RoutingPolicy
+    IDecisionRepository.ts           — append-only port for RoutingDecision
+    InMemoryPolicyRepository.ts      — Map + name index; auto-increments version on update
+    InMemoryDecisionRepository.ts    — Map + requestId index; never mutates after save
+  service/
+    routing.service.ts               — all policy/decision operations + evaluate() stub
+  routes/
+    routing.route.ts                 — buildRoutingRoute factory (read-only, 4 endpoints)
+  index.ts                           — public barrel; wires repos → service → route
+```
+
+### Extended routing contracts (added in Ticket 7)
+
+**New enums:**
+- `RoutingPolicyStatus` — Active | Inactive | Archived
+- `DecisionSource` — Live | Simulation
+
+**New value objects:**
+- `StrategyWeights` — {quality, cost, latency, load} coefficients for weighted scoring
+- `ScoreBreakdown` — structured per-candidate score ({quality, cost, latency, load, total, rationale})
+
+**Updated `RoutingPolicy`** — promoted from plain value object to a proper entity extending `BaseEntity`:
+| Field | Purpose |
+|---|---|
+| `id: PolicyId` | UUID assigned at creation |
+| `weights: StrategyWeights` | Scoring dimension weights for the strategy |
+| `priority: number` | Tie-breaking when multiple active policies match |
+| `version: number` | Bumped on every update; enables decision ↔ policy version audit |
+| `status: RoutingPolicyStatus` | Only Active policies are applied |
+
+**Updated `RoutingDecision`** — promoted to a proper entity:
+| Field | Purpose |
+|---|---|
+| `id: DecisionId` | UUID for the decision record itself |
+| `policyId: PolicyId` | Which policy (and version) produced this decision |
+| `usedFallback: boolean` | Whether primary strategy failed and fallback was applied |
+| `fallbackReason?: string` | Why fallback was triggered |
+| `decisionSource: DecisionSource` | Live traffic vs simulation run |
+
+**Updated `RoutingCandidate`** — `scoreBreakdown` replaced from `string` to `ScoreBreakdown` object.
+
+Also added `PolicyId` and `DecisionId` branded types to `shared/primitives.ts`.
+
+### Design decisions
+
+**Two repositories, one service** — `IPolicyRepository` (mutable CRUD) and `IDecisionRepository` (append-only log) are separate ports. This makes the immutability of decisions explicit at the type level and enables them to be independently scaled or persisted to different backends (e.g. policies in Postgres, decisions in S3 / time-series DB).
+
+**requestId secondary index in InMemoryDecisionRepository** — a single inference request may map to multiple decisions (retries, simulation runs). The index maps requestId → [decisionId, ...] for O(1) filtering when requestId is the only query filter.
+
+**version auto-increment in InMemoryPolicyRepository** — the repository bumps `version` on every `update()` call. This means a decision record can always be traced back to the exact policy version that produced it, enabling historical replay.
+
+**evaluate() stub** — `RoutingService.evaluate()` is typed and documented but throws `"not yet implemented"`. Ticket 8 will fill in the placement algorithm: model resolution → worker collection → constraint filtering → weighted scoring → winner selection → decision persistence.

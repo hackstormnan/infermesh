@@ -28,6 +28,8 @@ export type ModelId = Brand<string, "ModelId">;
 export type WorkerId = Brand<string, "WorkerId">;
 export type SimulationId = Brand<string, "SimulationId">;
 export type MetricId = Brand<string, "MetricId">;
+export type PolicyId = Brand<string, "PolicyId">;
+export type DecisionId = Brand<string, "DecisionId">;
 
 /** Any domain entity ID — use when the specific kind is unknown at the call site */
 export type AnyEntityId =
@@ -36,7 +38,9 @@ export type AnyEntityId =
   | ModelId
   | WorkerId
   | SimulationId
-  | MetricId;
+  | MetricId
+  | PolicyId
+  | DecisionId;
 
 // ─── Timestamp ────────────────────────────────────────────────────────────────
 
