@@ -8,7 +8,7 @@
  * signal for the routing engine when it is wired in a future ticket.
  *
  * IntakeResponseDto is the immediate intake acknowledgement returned to the
- * caller. It confirms what was created so the caller can poll or stream.
+ * caller. It confirms what was created and queued so the caller can poll.
  */
 
 import { z } from "zod";
@@ -45,7 +45,7 @@ export const intakeRequestSchema = z.object({
   /** Scheduling priority. Defaults to "normal" when omitted. */
   priority: z.enum(["low", "normal", "high"]).optional().default("normal"),
 
-  /** Arbitrary caller metadata forwarded unchanged (not persisted yet). */
+  /** Arbitrary caller metadata forwarded unchanged to the queue message. */
   metadata: z.record(z.unknown()).optional(),
 });
 
@@ -54,18 +54,24 @@ export type IntakeRequestBody = z.infer<typeof intakeRequestSchema>;
 // ─── Response DTO ─────────────────────────────────────────────────────────────
 
 /**
- * Acknowledgement returned by POST /api/v1/inference/requests.
- * Contains the IDs and initial statuses of the created records.
+ * Acknowledgement returned by POST /api/v1/inference/requests (HTTP 202).
+ *
+ * Contains the IDs and initial statuses of the created records plus the
+ * queue message ID so callers can correlate all three: request ↔ job ↔ message.
  */
 export interface IntakeResponseDto {
   /** ID of the persisted InferenceRequest */
   requestId: string;
-  /** ID of the linked Job created by the routing engine */
+  /** ID of the linked Job (status: Queued) */
   jobId: string;
+  /** ID of the QueueMessage — use this to track queue position */
+  queueMessageId: string;
   /** Current InferenceRequest lifecycle status (Dispatched on success) */
   status: RequestStatus;
   /** Current Job lifecycle status (Queued on success) */
   jobStatus: JobStatus;
   /** ISO timestamp when the InferenceRequest was created */
   createdAt: string;
+  /** Unix epoch ms when the job was placed in the queue */
+  enqueuedAt: number;
 }

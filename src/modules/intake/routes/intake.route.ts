@@ -6,6 +6,10 @@
  * Routes registered (all under /api/v1 prefix):
  *   POST /inference/requests — submit a new inference request
  *
+ * Returns HTTP 202 Accepted: the request has been received, persisted, and
+ * queued for asynchronous routing and execution. The response includes
+ * requestId, jobId, and queueMessageId so the caller can poll for progress.
+ *
  * The handler is intentionally thin: parse → validate → delegate → respond.
  * All orchestration logic lives in IntakeService.
  */
@@ -54,18 +58,20 @@ export function buildIntakeRoute(service: IntakeService): FastifyPluginAsync {
             },
           },
           response: {
-            201: {
+            202: {
               type: "object",
               properties: {
                 success: { type: "boolean" },
                 data: {
                   type: "object",
                   properties: {
-                    requestId: { type: "string" },
-                    jobId:     { type: "string" },
-                    status:    { type: "string" },
-                    jobStatus: { type: "string" },
-                    createdAt: { type: "string" },
+                    requestId:      { type: "string" },
+                    jobId:          { type: "string" },
+                    queueMessageId: { type: "string" },
+                    status:         { type: "string" },
+                    jobStatus:      { type: "string" },
+                    createdAt:      { type: "string" },
+                    enqueuedAt:     { type: "integer" },
                   },
                 },
                 meta: {
@@ -83,7 +89,7 @@ export function buildIntakeRoute(service: IntakeService): FastifyPluginAsync {
       async (request, reply) => {
         const body = intakeRequestSchema.parse(request.body);
         const dto = await service.intake(request.ctx, body);
-        return reply.status(201).send(successResponse(dto, buildMeta(request.id as string)));
+        return reply.status(202).send(successResponse(dto, buildMeta(request.id as string)));
       },
     );
   };

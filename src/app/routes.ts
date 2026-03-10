@@ -18,6 +18,7 @@ import { routingRoute } from "../modules/routing";
 import { metricsRoute } from "../modules/metrics";
 import { jobsRoute } from "../modules/jobs";
 import { intakeRoute } from "../modules/intake";
+import { queueRoute } from "../modules/queue";
 
 export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // Infrastructure routes (no versioned prefix — used by load balancers / k8s probes)
@@ -25,6 +26,9 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
 
   // Intake — primary entry point for inference requests
   await fastify.register(intakeRoute, { prefix: "/api/v1" });
+
+  // Queue — internal/debug inspection endpoint
+  await fastify.register(queueRoute, { prefix: "/api/v1" });
 
   // Domain read/management routes — versioned under /api/v1
   await fastify.register(requestsRoute, { prefix: "/api/v1" });
