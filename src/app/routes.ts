@@ -15,6 +15,7 @@ import { requestsRoute } from "../modules/requests";
 import { modelsRoute } from "../modules/models";
 import { workersRoute } from "../modules/workers";
 import { routingRoute } from "../modules/routing";
+import { metricsRoute } from "../modules/metrics";
 
 export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // Infrastructure routes (no versioned prefix — used by load balancers / k8s probes)
@@ -25,4 +26,5 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   await fastify.register(modelsRoute, { prefix: "/api/v1" });
   await fastify.register(workersRoute, { prefix: "/api/v1" });
   await fastify.register(routingRoute, { prefix: "/api/v1" });
+  await fastify.register(metricsRoute, { prefix: "/api/v1" });
 }

@@ -372,3 +372,61 @@ Also added `PolicyId` and `DecisionId` branded types to `shared/primitives.ts`.
 **version auto-increment in InMemoryPolicyRepository** — the repository bumps `version` on every `update()` call. This means a decision record can always be traced back to the exact policy version that produced it, enabling historical replay.
 
 **evaluate() stub** — `RoutingService.evaluate()` is typed and documented but throws `"not yet implemented"`. Ticket 8 will fill in the placement algorithm: model resolution → worker collection → constraint filtering → weighted scoring → winner selection → decision persistence.
+
+---
+
+## Metrics Module — Internal Structure
+
+```
+src/modules/metrics/
+  queries.ts                              — MetricPeriod type, metricsQuerySchema, period helpers
+  repository/
+    IMetricsRepository.ts                 — read-only port (4 query methods)
+    InMemoryMetricsRepository.ts          — zeroed stub impl for local dev / tests
+  service/
+    metrics.service.ts                    — delegates to repo; owns log context
+  routes/
+    metrics.route.ts                      — buildMetricsRoute factory (4 GET endpoints)
+  index.ts                                — public barrel; wires repo → service → route
+```
+
+### Extended metrics contracts (added in Ticket 8)
+
+**New type alias:**
+- `MetricPeriod` — `"1h" | "24h" | "7d" | "30d"` — coarser than `MetricWindow`; intended for API query params
+
+**New value objects:**
+- `TrendIndicator` — `{ delta, percent, direction }` — period-over-period change for a scalar metric
+- `TimeSeriesPoint` — single time-bucket: `{ timestamp (epoch ms), requests, avgLatencyMs, costUsd, errors }`
+
+**New read models (dashboard DTOs):**
+
+| Type | Endpoint | Purpose |
+|---|---|---|
+| `MetricsSummary` | `/metrics/summary` | Volume, latency, quality, cost + 4 trend indicators |
+| `TimeSeriesData` | `/metrics/time-series` | Ordered array of `TimeSeriesPoint` with period + granularity metadata |
+| `LatencyPercentilesReport` | `/metrics/latency-percentiles` | p50/p75/p95/p99 + sample count |
+| `CostBreakdown` | `/metrics/cost-breakdown` | Per-model cost share (`CostBreakdownEntry[]` sorted by cost desc) |
+
+### Period → bucket granularity mapping
+
+| Period | Bucket width | Point count |
+|---|---|---|
+| `1h` | 5 minutes | 12 |
+| `24h` | 1 hour | 24 |
+| `7d` | 6 hours | 28 |
+| `30d` | 1 day | 30 |
+
+Constants live in `queries.ts` (`PERIOD_DURATION_MS`, `PERIOD_GRANULARITY_MS`).
+
+### Design decisions
+
+**Three-tier contract model** — `shared/contracts/metrics.ts` now contains three clearly separated tiers: raw write models (`RequestMetricRecord`, `WorkerMetricRecord`), internal aggregated snapshots (`AggregatedMetrics`, `WorkerSnapshot`, `ModelSnapshot`), and dashboard DTOs (`MetricsSummary`, `TimeSeriesData`, etc.). This separation ensures each consumer gets the right abstraction level without mixing concerns.
+
+**Read-only repository port** — `IMetricsRepository` has no write methods. Metric ingestion is a separate concern owned by the requests and workers modules (Ticket 9). This prevents the metrics API from becoming a write path and keeps the read-store swappable (in-memory → InfluxDB / Prometheus / TimescaleDB) with no service or route changes.
+
+**Zeroed stub implementation** — `InMemoryMetricsRepository` returns structurally valid but zeroed responses. The domain model, API surface, and query contracts are fully established so that a production-grade aggregator can slot in when Ticket 9 wires metric ingestion.
+
+**Single `period` query parameter** — all four endpoints share the same `metricsQuerySchema`. This keeps the API surface minimal and consistent — clients always specify one period and get back period-tagged responses so they can safely cache and diff across calls.
+
+**`TrendIndicator` as a first-class type** — trend data (delta, percent, direction) is modelled explicitly rather than returning raw before/after values. This makes the UI contract stable: the client never needs to compute trends itself, and the server can switch aggregation strategies without breaking the response shape.
