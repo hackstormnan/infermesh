@@ -49,6 +49,7 @@ export class InMemoryJobRepository implements IJobRepository {
     const updated: Job = {
       ...job,
       status: update.status,
+      startedAt: update.startedAt ?? job.startedAt,
       completedAt: update.completedAt ?? job.completedAt,
       updatedAt: toIsoTimestamp(),
     };

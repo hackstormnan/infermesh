@@ -143,3 +143,37 @@ export interface JobCompletedEvent {
 }
 
 export type JobEvent = JobDispatchedEvent | JobCompletedEvent;
+
+// ─── Transition history ───────────────────────────────────────────────────────
+
+/**
+ * A single entry in a job's lifecycle history.
+ * One record is appended for every valid status transition.
+ *
+ * Stored by JobLifecycleService and queryable via getHistory(jobId).
+ * Not persisted to the entity itself — history is tracked separately in the
+ * lifecycle service to keep the Job entity focused on current state.
+ */
+export interface JobTransitionRecord {
+  /** The state the job was in before the transition */
+  fromStatus: JobStatus;
+  /** The state the job moved into */
+  toStatus: JobStatus;
+  /** Unix epoch ms when the transition occurred */
+  changedAt: number;
+  /**
+   * System component or API caller that triggered the transition.
+   * Examples: "api", "routing_engine", "worker_adapter", "retry_processor"
+   */
+  source: string;
+  /** Human-readable reason for the transition (optional) */
+  reason?: string;
+  /** Worker assigned at the time of transition (if any) */
+  workerId?: WorkerId;
+  /** Model assigned at the time of transition (if any) */
+  modelId?: ModelId;
+  /** Routing decision that produced the assignment (if any) */
+  routingDecisionId?: DecisionId;
+  /** Execution attempt number at the time of the transition (1-indexed) */
+  attempt: number;
+}

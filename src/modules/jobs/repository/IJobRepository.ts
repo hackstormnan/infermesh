@@ -29,17 +29,19 @@ import type { ListJobsQuery } from "../queries";
 
 /**
  * Minimal status-only transition. Used for simple lifecycle advances
- * (e.g. Queued → Routing, Running → Succeeded, Running → Cancelled).
+ * (e.g. Queued → Routing, Assigned → Running, Running → Succeeded).
  */
 export type JobStatusUpdate = {
   readonly status: JobStatus;
+  /** Set when the worker begins executing (Assigned → Running) */
+  readonly startedAt?: number;
   /** Set when the job reaches a terminal state */
   readonly completedAt?: number;
 };
 
 /**
  * Applied when the routing engine completes model + worker selection.
- * Transitions the job from Routing → Assigned.
+ * Transitions the job from Routing → Assigned or Retrying → Assigned.
  */
 export type JobAssignmentUpdate = {
   readonly status: JobStatus.Assigned;

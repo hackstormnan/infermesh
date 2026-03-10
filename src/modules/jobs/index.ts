@@ -10,21 +10,21 @@
  * Cross-module access goes through the public service instance or DTO types.
  *
  * ─── Key consumers ───────────────────────────────────────────────────────────
- * - Routing engine (future ticket): calls jobsService.createJob() then
- *   jobsService.assignJob() as part of the evaluate() dispatch flow
- * - Execution layer (future ticket): calls jobsService.recordFailure() and
- *   jobsService.incrementRetryCount() during the retry loop
+ * - Intake module: calls jobsService.createJob() to initialize a new job
+ * - Routing engine (future): calls jobLifecycleService.moveToRouting() then
+ *   jobLifecycleService.assignJob() as part of the evaluate() dispatch flow
+ * - Execution layer (future): calls jobLifecycleService.startJob(),
+ *   jobLifecycleService.completeJob(), jobLifecycleService.failJob()
  * - Dashboard / monitoring clients: call the /jobs/* REST endpoints
  *
  * ─── Job lifecycle ────────────────────────────────────────────────────────────
  *   Queued → Routing → Assigned → Running → Succeeded
- *                                          ↘ Failed → Retrying → Assigned (retry)
+ *                    ↘          ↘ Failed → Retrying → Assigned (retry)
  *                              → Cancelled (at any pre-terminal state)
  *
- * ─── Repository design ───────────────────────────────────────────────────────
- * IJobRepository exposes granular update methods (updateStatus, updateAssignment,
- * recordFailure, incrementRetryCount) rather than a single generic patch.
- * This makes each lifecycle transition explicit at the type level.
+ * ─── Services ────────────────────────────────────────────────────────────────
+ *   jobsService          — CRUD + read operations (createJob, getById, list)
+ *   jobLifecycleService  — All status transitions with validation + history
  *
  * ─── API surface ─────────────────────────────────────────────────────────────
  *   GET /api/v1/jobs/:id   — fetch a single job by UUID
@@ -39,13 +39,20 @@
 import { InMemoryJobRepository } from "./repository/InMemoryJobRepository";
 import { JobsService } from "./service/jobs.service";
 import { buildJobsRoute } from "./routes/jobs.route";
+import { JobLifecycleService } from "./lifecycle/job-lifecycle.service";
 
 // ─── Module composition ───────────────────────────────────────────────────────
 
 const jobsRepo = new InMemoryJobRepository();
 
-/** Singleton service instance — shared across the process lifetime */
+/** Singleton CRUD service — createJob, getById, list */
 export const jobsService = new JobsService(jobsRepo);
+
+/**
+ * Singleton lifecycle service — all validated status transitions + history.
+ * Shares the same repository instance as jobsService.
+ */
+export const jobLifecycleService = new JobLifecycleService(jobsRepo);
 
 /** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
 export const jobsRoute = buildJobsRoute(jobsService);
@@ -54,6 +61,7 @@ export const jobsRoute = buildJobsRoute(jobsService);
 
 export type {
   Job,
+  JobTransitionRecord,
   JobDispatchedEvent,
   JobCompletedEvent,
   JobEvent,
@@ -71,3 +79,7 @@ export { listJobsQuerySchema } from "./queries";
 export type { IJobRepository, JobStatusUpdate, JobAssignmentUpdate, JobFailureUpdate } from "./repository/IJobRepository";
 
 export type { JobDto, CreateJobDto } from "./service/jobs.service";
+
+export { JobLifecycleService } from "./lifecycle/job-lifecycle.service";
+export type { TransitionMeta, FailureInfo } from "./lifecycle/job-lifecycle.service";
+export { InvalidTransitionError, canTransition, isTerminal, ALLOWED_TRANSITIONS } from "./lifecycle/transitions";
