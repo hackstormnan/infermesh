@@ -9,29 +9,38 @@
  * internally by the routing and worker modules.
  *
  * Lifecycle:
- *   Pending → Assigned → Running → Completed
- *                                ↘ Failed → Retrying → Assigned (retry loop)
- *                      → Cancelled
+ *   Queued → Routing → Assigned → Running → Succeeded
+ *                                          ↘ Failed → Retrying → Assigned (retry loop)
+ *                              → Cancelled (at any pre-terminal state)
  */
 
-import type { BaseEntity, JobId, ModelId, RequestId, WorkerId } from "../primitives";
+import type {
+  BaseEntity,
+  DecisionId,
+  JobId,
+  ModelId,
+  RequestId,
+  WorkerId,
+} from "../primitives";
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
 export enum JobStatus {
-  /** Created by the router; no worker has been assigned yet */
-  Pending = "pending",
-  /** A worker has been selected and notified */
+  /** Entered the queue; awaiting routing engine selection */
+  Queued = "queued",
+  /** Routing engine is selecting model + worker */
+  Routing = "routing",
+  /** Model and worker selected; notified and waiting for acknowledgement */
   Assigned = "assigned",
-  /** Worker has acknowledged and is executing */
+  /** Worker has acknowledged and is executing the inference */
   Running = "running",
-  /** Successfully completed by the worker */
-  Completed = "completed",
-  /** Failed; eligible for retry if attempts remain */
+  /** Inference completed successfully */
+  Succeeded = "succeeded",
+  /** Inference failed; may be eligible for retry */
   Failed = "failed",
   /** Waiting before the next retry attempt */
   Retrying = "retrying",
-  /** Cancelled externally before completion */
+  /** Cancelled externally before reaching a terminal state */
   Cancelled = "cancelled",
 }
 
@@ -42,32 +51,63 @@ export enum JobPriority {
   Critical = 3,
 }
 
+/**
+ * Whether the job originates from live API traffic or an internal simulation run.
+ * Mirrors DecisionSource from the routing module but is declared independently
+ * to avoid a cross-contract dependency.
+ */
+export enum JobSourceType {
+  Live = "live",
+  Simulation = "simulation",
+}
+
 // ─── Domain entity ────────────────────────────────────────────────────────────
 
 /**
  * Job — the internal execution unit created by the routing engine.
- * One Job is created per InferenceRequest dispatch attempt.
+ * One Job is created per dispatch attempt of an InferenceRequest.
  * On failure, a new Job may be created for a retry (linked by requestId).
+ *
+ * Fields marked optional are populated progressively as the job advances
+ * through its lifecycle; they are undefined while the job is in earlier states.
  */
 export interface Job extends BaseEntity {
   readonly id: JobId;
   readonly requestId: RequestId;
-  readonly modelId: ModelId;
-  readonly workerId: WorkerId;
+  /** Whether this job originates from live traffic or a simulation run */
+  readonly sourceType: JobSourceType;
+
+  // ── Routing assignments (populated after Routing → Assigned transition) ──────
+  /** Model selected by the routing engine; undefined in Queued/Routing states */
+  readonly modelId?: ModelId;
+  /** Worker selected by the routing engine; undefined in Queued/Routing states */
+  readonly workerId?: WorkerId;
+  /** References the RoutingDecision record that produced this assignment */
+  readonly routingDecisionId?: DecisionId;
+
+  // ── Lifecycle state ──────────────────────────────────────────────────────────
   status: JobStatus;
   priority: JobPriority;
-  /** Number of execution attempts made so far (1-indexed; 1 = first attempt) */
+  /** 1-indexed execution attempt counter; incremented on each retry */
   attempts: number;
-  /** Maximum number of attempts allowed before permanent failure */
+  /** Maximum execution attempts allowed before permanent failure */
   maxAttempts: number;
-  /** Unix epoch ms of when the job was dispatched to the worker */
-  dispatchedAt?: number;
-  /** Unix epoch ms of when the worker acknowledged the job */
-  acknowledgedAt?: number;
-  /** Unix epoch ms of when the job reached a terminal state */
-  finishedAt?: number;
-  /** Reason for the most recent failure (overwritten on each retry) */
+
+  // ── Failure details (overwritten on each failed attempt) ─────────────────────
+  /** Short structured failure code, e.g. "WORKER_TIMEOUT", "OOM" */
+  failureCode?: string;
+  /** Human-readable failure message from the most recent failed attempt */
   lastFailureReason?: string;
+
+  // ── Lifecycle timestamps (Unix epoch ms) ─────────────────────────────────────
+  /** When the job entered the queue */
+  readonly queuedAt: number;
+  /** When the routing engine completed assignment */
+  assignedAt?: number;
+  /** When the worker began executing the inference */
+  startedAt?: number;
+  /** When the job reached a terminal state (Succeeded, Failed, or Cancelled) */
+  completedAt?: number;
 }
 
 // ─── Internal event payloads ──────────────────────────────────────────────────
@@ -94,7 +134,7 @@ export interface JobCompletedEvent {
   type: "job.completed";
   jobId: JobId;
   requestId: RequestId;
-  status: JobStatus.Completed | JobStatus.Failed | JobStatus.Cancelled;
+  status: JobStatus.Succeeded | JobStatus.Failed | JobStatus.Cancelled;
   tokensIn?: number;
   tokensOut?: number;
   durationMs?: number;

@@ -430,3 +430,65 @@ Constants live in `queries.ts` (`PERIOD_DURATION_MS`, `PERIOD_GRANULARITY_MS`).
 **Single `period` query parameter** — all four endpoints share the same `metricsQuerySchema`. This keeps the API surface minimal and consistent — clients always specify one period and get back period-tagged responses so they can safely cache and diff across calls.
 
 **`TrendIndicator` as a first-class type** — trend data (delta, percent, direction) is modelled explicitly rather than returning raw before/after values. This makes the UI contract stable: the client never needs to compute trends itself, and the server can switch aggregation strategies without breaking the response shape.
+
+---
+
+## Jobs Module — Internal Structure
+
+```
+src/modules/jobs/
+  queries.ts                              — ListJobsQuery (status/worker/model/request filters)
+  repository/
+    IJobRepository.ts                     — granular write port (7 operations)
+    InMemoryJobRepository.ts              — Map + requestId index; newest-queued-first sort
+  service/
+    jobs.service.ts                       — service layer + toDto(); owns NotFoundError guards
+  routes/
+    jobs.route.ts                         — buildJobsRoute factory (GET /jobs/:id, GET /jobs)
+  index.ts                                — public barrel; wires repo → service → route
+```
+
+### Extended job contracts (added in Ticket 9)
+
+**New enum values on `JobStatus`:**
+- `Queued` — entered the queue, awaiting routing selection
+- `Routing` — routing engine is selecting model + worker
+- `Succeeded` — inference completed successfully (clearer than the previous `Completed`)
+
+**New enum `JobSourceType`:**
+- `Live` — originates from live API traffic
+- `Simulation` — originates from an internal simulation run
+
+**Reworked `Job` entity** (all fields readonly except mutable lifecycle fields):
+
+| Field | Type | Notes |
+|---|---|---|
+| `sourceType` | `JobSourceType` | Live or Simulation |
+| `modelId?` | `ModelId` | Undefined in Queued/Routing states |
+| `workerId?` | `WorkerId` | Undefined in Queued/Routing states |
+| `routingDecisionId?` | `DecisionId` | Links to the RoutingDecision that assigned this job |
+| `failureCode?` | `string` | Structured code, e.g. `WORKER_TIMEOUT` |
+| `queuedAt` | `number` (epoch ms) | When the job entered the queue |
+| `assignedAt?` | `number` (epoch ms) | When routing assigned model + worker |
+| `startedAt?` | `number` (epoch ms) | When the worker began executing |
+| `completedAt?` | `number` (epoch ms) | When the job reached a terminal state |
+
+### Repository write method taxonomy
+
+| Method | Lifecycle transition | Key payload fields |
+|---|---|---|
+| `create` | — → Queued | Full Job entity |
+| `updateStatus` | Any simple transition | `status`, `completedAt?` |
+| `updateAssignment` | Routing → Assigned | `modelId`, `workerId`, `routingDecisionId`, `assignedAt` |
+| `recordFailure` | Running → Failed/Retrying | `failureCode?`, `lastFailureReason?`, `completedAt?` |
+| `incrementRetryCount` | Retrying → Running | `startedAt` (attempts auto-incremented) |
+
+### Design decisions
+
+**Granular update methods** — rather than a single generic `update(patch)`, the repository exposes five purpose-named write methods. Each method accepts only the fields relevant to that transition and applies the right timestamp. This prevents callers from accidentally overwriting assignment fields during a failure record, or vice versa, and makes the lifecycle explicit at the type level.
+
+**Optional modelId/workerId on Job entity** — at Queued and Routing stages, no worker has been selected yet. Making these fields optional (vs the earlier contract where they were required) accurately models the progressive population of job fields across the lifecycle.
+
+**requestId secondary index** — a single InferenceRequest can produce multiple Jobs if the first attempt fails and a retry is dispatched. The `byRequestId` Map allows O(k) lookup of all jobs for a given request without a full scan.
+
+**Write routes deferred** — `createJob()`, `assignJob()`, `recordFailure()`, and `incrementRetryCount()` are implemented and tested in the service. REST write endpoints (`POST /jobs`, etc.) are intentionally excluded — these operations are internal service calls driven by the routing and execution engines, not by external API callers.
