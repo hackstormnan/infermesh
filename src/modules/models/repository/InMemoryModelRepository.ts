@@ -34,6 +34,10 @@ export class InMemoryModelRepository implements IModelRepository {
     return model;
   }
 
+  async findAll(): Promise<Model[]> {
+    return Array.from(this.byId.values());
+  }
+
   async findById(id: ModelId): Promise<Model | null> {
     return this.byId.get(id) ?? null;
   }

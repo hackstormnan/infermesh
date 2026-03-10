@@ -8,6 +8,7 @@
  * DynamoDB, Redis) can be swapped in by changing the binding in index.ts.
  *
  * ─── Lookup semantics ────────────────────────────────────────────────────────
+ *   findAll    — all models (no filtering), used by the registry service
  *   findById   — exact match on the branded ModelId (UUID)
  *   findByName — matches canonical name OR any alias (case-insensitive)
  *   list       — paginated, filtered, sorted by name ascending
@@ -24,6 +25,16 @@ import type { ListModelsQuery } from "../queries";
 export interface IModelRepository {
   /** Persist a new model. The caller must supply a fully-constructed entity. */
   create(model: Model): Promise<Model>;
+
+  /**
+   * Return every registered model without filtering or pagination.
+   *
+   * Used by the model registry service to retrieve a complete candidate set
+   * for eligibility filtering at routing time. Prefer this over the paginated
+   * `list()` when the caller needs all models (routing must not silently drop
+   * candidates due to a page boundary).
+   */
+  findAll(): Promise<Model[]>;
 
   /** Retrieve a model by its UUID. Returns null if not found. */
   findById(id: ModelId): Promise<Model | null>;
