@@ -30,7 +30,7 @@ import type {
 import { RequestStatus } from "../../../shared/contracts/request";
 import type { PaginatedResponse, RequestId } from "../../../shared/primitives";
 import { toIsoTimestamp } from "../../../shared/primitives";
-import type { IRequestRepository } from "../repository/IRequestRepository";
+import type { IRequestRepository, StatusUpdate } from "../repository/IRequestRepository";
 import type { ListRequestsQuery } from "../queries";
 
 export class RequestsService {
@@ -66,7 +66,29 @@ export class RequestsService {
     };
   }
 
-  // ─── Write operations (wired to routes in Ticket 6) ───────────────────────
+  // ─── Write operations ─────────────────────────────────────────────────────
+
+  /**
+   * Transition a request to a new lifecycle status, optionally stamping
+   * associated fields (e.g. jobId when advancing to Dispatched).
+   * Called by the intake orchestrator after a job is created.
+   */
+  async updateStatus(
+    ctx: RequestContext,
+    id: string,
+    status: RequestStatus,
+    updates?: StatusUpdate,
+  ): Promise<InferenceRequestDto> {
+    ctx.log.debug({ inferenceRequestId: id, status }, "Updating request status");
+
+    const updated = await this.repo.updateStatus(id as RequestId, status, updates);
+    if (!updated) {
+      throw new NotFoundError(`Request ${id}`);
+    }
+    return toDto(updated);
+  }
+
+  // ─── Legacy write operations (wired to routes in Ticket 6) ───────────────
 
   /**
    * Constructs and persists a new InferenceRequest from an inbound DTO.
