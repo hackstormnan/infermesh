@@ -264,3 +264,50 @@ The shared `Model` entity was extended with four routing-relevant fields:
 **`metadata` excluded from ModelDto** — The `metadata` field (provider-specific configuration) is intentionally omitted from the API response. It may contain API keys, internal routing hints, or other fields not safe to expose to callers.
 
 **Write routes deferred** — `register()` and `update()` are implemented in the service and ready to connect. `POST /models` and `PATCH /models/:id` will be wired in a later ticket alongside admin authentication guards.
+
+---
+
+## Workers Module — Internal Structure
+
+```
+src/modules/workers/
+  queries.ts                         — ListWorkersQuery (status, region, name prefix, id prefix)
+  repository/
+    IWorkerRepository.ts             — repository port (interface)
+    InMemoryWorkerRepository.ts      — dual-index Map adapter (byId + byName)
+  service/
+    workers.service.ts               — service layer; owns business logic + toDto mapper
+  routes/
+    workers.route.ts                 — buildWorkersRoute factory (read-only)
+  index.ts                           — public barrel; wires repo → service → route
+```
+
+### Extended worker metadata (added in Ticket 6)
+
+The shared `Worker` entity was extended with two new value objects:
+
+**`WorkerHardware`** (static, set at registration):
+| Field | Type | Purpose |
+|---|---|---|
+| `instanceType` | `string` | Cloud instance or hardware label (e.g. "g4dn.xlarge", "cpu-only") |
+| `gpuModel` | `string?` | GPU model name; absent for CPU-only workers |
+
+**`WorkerRuntimeMetrics`** (dynamic, updated on every heartbeat):
+| Field | Type | Purpose |
+|---|---|---|
+| `tokensPerSecond` | `number?` | Observed throughput |
+| `loadScore` | `number?` | 0.0–1.0 composite load; primary routing signal |
+| `ttftMs` | `number?` | Observed time-to-first-token |
+| `cpuUsagePercent` | `number?` | CPU utilisation (0–100) |
+| `memoryUsagePercent` | `number?` | Memory utilisation (0–100) |
+| `uptimeSeconds` | `number?` | Worker process uptime |
+
+### Design decisions
+
+**Separate static vs dynamic metadata** — `WorkerHardware` (set at registration, `readonly` on entity) is never mutated. `WorkerRuntimeMetrics` (mutable, updated via heartbeat) is deep-merged in `InMemoryWorkerRepository.update()` so a partial heartbeat doesn't erase previously reported values.
+
+**Heartbeat as a unified update** — `WorkersService.heartbeat()` applies status, capacity, lastHeartbeatAt, and runtimeMetrics in a single repository write. The routing engine always sees a consistent snapshot.
+
+**Name uniqueness enforced in the service** — Same pattern as the models module: conflict detection happens before persistence so the repository stays simple.
+
+**Write routes deferred** — `register()`, `heartbeat()`, and `deregister()` are implemented in the service. `POST /workers`, `POST /workers/:id/heartbeat`, and `DELETE /workers/:id` will be wired in Ticket 8 alongside heartbeat eviction.
