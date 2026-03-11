@@ -1,17 +1,17 @@
 /**
  * modules/routing — Policy-Driven Placement Engine
  *
- * Owns routing policy management (CRUD, versioning, activation) and the
- * immutable decision audit log. The placement algorithm (evaluate()) will
- * be implemented in Ticket 8.
+ * Owns routing policy management (CRUD, versioning, activation), the immutable
+ * decision audit log, and the routing decision engine that selects the best
+ * (model, worker) pair for each inference request.
  *
  * ─── Module boundaries ───────────────────────────────────────────────────────
  * Internal layers (repositories, service, routes) are not re-exported.
- * Cross-module access goes through the public service instance or DTO types.
+ * Cross-module access goes through the public service instances or DTO types.
  *
  * ─── Key consumers ───────────────────────────────────────────────────────────
- * - Request intake (Ticket 8): calls routingService.evaluate() on each request
- * - Simulation (Ticket 11): calls routingService.evaluate() with DecisionSource.Simulation
+ * - Request intake: calls routingDecisionService.decideRoute() on each request
+ * - Simulation: calls routingDecisionService.decideRoute() with DecisionSource.Simulation
  *   and routingService.listDecisions() to compare policy performance
  *
  * ─── Two-repository design ───────────────────────────────────────────────────
@@ -25,8 +25,8 @@
  *   GET  /api/v1/routing/policies       — paginated list with status/strategy/name filters
  *   GET  /api/v1/routing/decisions/:id  — fetch a decision by UUID
  *   GET  /api/v1/routing/decisions      — paginated list with outcome/source/time filters
- *   POST /api/v1/routing/policies       — create a policy (Ticket 8)
- *   PATCH /api/v1/routing/policies/:id  — activate/deactivate (Ticket 8)
+ *   POST /api/v1/routing/policies       — create a policy
+ *   PATCH /api/v1/routing/policies/:id  — activate/deactivate
  *
  * ─── Wiring ──────────────────────────────────────────────────────────────────
  * Register routes in app/routes.ts:
@@ -39,6 +39,9 @@ import { InMemoryPolicyRepository } from "./repository/InMemoryPolicyRepository"
 import { RoutingService } from "./service/routing.service";
 import { buildRoutingRoute } from "./routes/routing.route";
 import { CandidateEvaluatorService } from "./evaluation/candidate-evaluator.service";
+import { RoutingDecisionService } from "./decision/routing-decision.service";
+import { modelRegistryService } from "../models";
+import { workerRegistryService } from "../workers";
 
 // ─── Module composition ───────────────────────────────────────────────────────
 
@@ -54,9 +57,32 @@ export const routingRoute = buildRoutingRoute(routingService);
 /**
  * Stateless candidate evaluation service — scores ModelCandidate[] and
  * WorkerCandidate[] with structured per-dimension breakdowns.
- * Used by the routing engine (Ticket 16+) and simulation (future).
+ * Used by the routing engine and simulation.
  */
 export const candidateEvaluatorService = new CandidateEvaluatorService();
+
+/**
+ * Routing decision engine — resolves the active policy, evaluates candidates,
+ * selects the best (model, worker) pair, and records an immutable RoutingDecision.
+ *
+ * Primary entry point for live routing and simulation replay.
+ *
+ * Usage:
+ *   const result = await routingDecisionService.decideRoute(ctx, {
+ *     requestId: "req-123",
+ *     jobId: "job-456",
+ *     decisionSource: DecisionSource.Live,
+ *   });
+ *   // result.decision — persisted RoutingDecision record
+ *   // result.modelScores / result.workerScores — full evaluation detail
+ */
+export const routingDecisionService = new RoutingDecisionService(
+  policyRepo,
+  decisionRepo,
+  modelRegistryService,
+  workerRegistryService,
+  candidateEvaluatorService,
+);
 
 // ─── Public type re-exports ───────────────────────────────────────────────────
 
@@ -114,3 +140,20 @@ export {
   DEFAULT_MODEL_SCORING_WEIGHTS,
   DEFAULT_WORKER_SCORING_WEIGHTS,
 } from "./evaluation/evaluation.contract";
+
+// ─── Routing decision exports ─────────────────────────────────────────────────
+
+export { RoutingDecisionService } from "./decision/routing-decision.service";
+
+export type {
+  DecideRouteInput,
+  DecideRouteResult,
+  ModelSelectionSummary,
+  WorkerSelectionSummary,
+} from "./decision/routing-decision.contract";
+
+export {
+  NoActivePolicyError,
+  NoEligibleModelError,
+  NoEligibleWorkerError,
+} from "./decision/routing-decision.contract";

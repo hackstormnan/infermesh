@@ -17,6 +17,7 @@ import { z } from "zod";
 import type {
   BaseEntity,
   DecisionId,
+  JobId,
   ModelId,
   PolicyId,
   RequestId,
@@ -213,6 +214,8 @@ export interface RoutingCandidate {
 export interface RoutingDecision extends BaseEntity {
   readonly id: DecisionId;
   readonly requestId: RequestId;
+  /** Job associated with this routing decision, if available */
+  readonly jobId?: JobId;
   /** The policy that governed this evaluation */
   readonly policyId: PolicyId;
   readonly outcome: RoutingOutcome;
