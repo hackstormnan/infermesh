@@ -38,6 +38,7 @@ import { InMemoryDecisionRepository } from "./repository/InMemoryDecisionReposit
 import { InMemoryPolicyRepository } from "./repository/InMemoryPolicyRepository";
 import { RoutingService } from "./service/routing.service";
 import { buildRoutingRoute } from "./routes/routing.route";
+import { CandidateEvaluatorService } from "./evaluation/candidate-evaluator.service";
 
 // ─── Module composition ───────────────────────────────────────────────────────
 
@@ -49,6 +50,13 @@ export const routingService = new RoutingService(policyRepo, decisionRepo);
 
 /** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
 export const routingRoute = buildRoutingRoute(routingService);
+
+/**
+ * Stateless candidate evaluation service — scores ModelCandidate[] and
+ * WorkerCandidate[] with structured per-dimension breakdowns.
+ * Used by the routing engine (Ticket 16+) and simulation (future).
+ */
+export const candidateEvaluatorService = new CandidateEvaluatorService();
 
 // ─── Public type re-exports ───────────────────────────────────────────────────
 
@@ -83,3 +91,26 @@ export type {
   RoutingPolicyDto,
   RoutingDecisionDto,
 } from "./service/routing.service";
+
+// ─── Candidate evaluation exports ────────────────────────────────────────────
+
+export { CandidateEvaluatorService } from "./evaluation/candidate-evaluator.service";
+
+export type {
+  ModelEvaluationProfile,
+  WorkerEvaluationProfile,
+  ModelScoringWeights,
+  WorkerScoringWeights,
+  ModelRawDimensions,
+  WorkerRawDimensions,
+  ModelDimensionScores,
+  WorkerDimensionScores,
+  ModelScoreResult,
+  WorkerScoreResult,
+  CandidateScoreResult,
+} from "./evaluation/evaluation.contract";
+
+export {
+  DEFAULT_MODEL_SCORING_WEIGHTS,
+  DEFAULT_WORKER_SCORING_WEIGHTS,
+} from "./evaluation/evaluation.contract";
