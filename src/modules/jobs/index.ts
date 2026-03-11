@@ -42,6 +42,7 @@ import { JobsService } from "./service/jobs.service";
 import { buildJobsRoute } from "./routes/jobs.route";
 import { JobLifecycleService } from "./lifecycle/job-lifecycle.service";
 import { JobRoutingService } from "./orchestration/job-routing.service";
+import { RoutingRecoveryService } from "./orchestration/recovery/routing-recovery.service";
 import { routingDecisionService } from "../routing";
 
 // ─── Module composition ───────────────────────────────────────────────────────
@@ -58,17 +59,31 @@ export const jobsService = new JobsService(jobsRepo);
 export const jobLifecycleService = new JobLifecycleService(jobsRepo);
 
 /**
- * Singleton routing orchestrator — routes a Queued job through the decision
- * engine and transitions it to Assigned with model/worker/decision stamped.
+ * Singleton recovery service — wraps RoutingDecisionService with bounded
+ * fallback and retry-eligibility logic. Stateless: does not touch the job
+ * lifecycle; that is the caller's responsibility (JobRoutingService).
+ *
+ * Strategy:
+ *   1. Primary attempt: decideRoute() with the original input
+ *   2. On NoEligibleWorker → fallback attempt: strips workerProfile soft hints
+ *   3. Returns RecoveryOutcome with full audit trail
+ */
+export const routingRecoveryService = new RoutingRecoveryService(routingDecisionService);
+
+/**
+ * Singleton routing orchestrator — routes a Queued or Retrying job through
+ * the decision + recovery engine and transitions it to Assigned (success),
+ * Retrying (retry scheduled), or Failed (terminal).
  *
  * Usage:
  *   const result = await jobRoutingService.routeJob(ctx, { jobId: "job-123" });
- *   // result.job — now Assigned; result.decision — persisted routing decision
+ *   // result.outcome — "assigned" | "retrying"
+ *   // result.job     — updated job entity
  */
 export const jobRoutingService = new JobRoutingService(
   jobsService,
   jobLifecycleService,
-  routingDecisionService,
+  routingRecoveryService,
 );
 
 /** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
@@ -108,6 +123,21 @@ export { JobRoutingService } from "./orchestration/job-routing.service";
 export type {
   RouteJobInput,
   RouteJobResult,
+  AssignedJobOutcome,
+  RetryingJobOutcome,
 } from "./orchestration/job-routing.contract";
 
 export { JobNotRoutableError } from "./orchestration/job-routing.contract";
+
+// ─── Routing recovery exports ─────────────────────────────────────────────────
+
+export { RoutingRecoveryService, classifyRoutingFailure } from "./orchestration/recovery/routing-recovery.service";
+
+export { RoutingFailureClass } from "./orchestration/recovery/routing-recovery.contract";
+
+export type {
+  RoutingRecoveryInfo,
+  RecoveryOutcome,
+  RecoverySucceeded,
+  RecoveryFailed,
+} from "./orchestration/recovery/routing-recovery.contract";

@@ -22,9 +22,9 @@
  *     │    └─► Failed                                               ▲
  *     ▼            │                                                │
  *   Succeeded    Retrying ──────────────────────────────────── Cancelled
- *   (terminal)      │
+ *   (terminal)      │    └─► Failed  (retry routing exhausted)
  *                   ▼
- *                 Assigned  (retry re-enters the assignment step)
+ *                 Assigned  (retry routing succeeded)
  *
  * Terminal states: Succeeded, Cancelled
  * Cancelled is reachable from any non-terminal state.
@@ -42,7 +42,7 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[
   [JobStatus.Running]:   [JobStatus.Succeeded, JobStatus.Failed,    JobStatus.Cancelled],
   [JobStatus.Succeeded]: [],
   [JobStatus.Failed]:    [JobStatus.Retrying,  JobStatus.Cancelled],
-  [JobStatus.Retrying]:  [JobStatus.Assigned,  JobStatus.Cancelled],
+  [JobStatus.Retrying]:  [JobStatus.Assigned,  JobStatus.Failed,    JobStatus.Cancelled],
   [JobStatus.Cancelled]: [],
 };
 

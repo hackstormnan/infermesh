@@ -1,45 +1,50 @@
 /**
  * modules/jobs/orchestration/job-routing.service.ts
  *
- * Orchestrates the full routing lifecycle for a single queued job.
+ * Orchestrates the full routing lifecycle for a single queued or retrying job.
  *
- * This service is the integration point between the job lifecycle (T9/T11)
- * and the routing decision engine (T16). It does not implement routing logic —
- * it sequences existing services into a single atomic unit of work.
+ * This service is the integration point between the job lifecycle (T9/T11),
+ * the routing recovery layer (T18), and the routing decision engine (T16).
+ * It does not implement routing or fallback logic — it sequences existing
+ * services and decides lifecycle transitions based on recovery outcomes.
  *
  * ─── Call flow ────────────────────────────────────────────────────────────────
  *
- *  1. jobsService.getById()           — load + validate Queued state
- *  2. jobLifecycle.moveToRouting()    — Queued → Routing
- *  3. routingDecision.decideRoute()   — resolve policy, score candidates, select
- *       └── on failure: failJob()    — Routing → Failed, then re-throw
- *  4. jobLifecycle.assignJob()        — Routing → Assigned (stamps ids)
- *  5. return RouteJobResult           — assigned job + full decision detail
+ *  1. jobsService.getById()              — load job; guard Queued | Retrying state
+ *  2. jobLifecycle.moveToRouting()       — Queued → Routing  (skipped for Retrying)
+ *  3. recoveryService.attemptWithRecovery()
+ *        ├── primary: decideRoute()
+ *        └── fallback (NoEligibleWorker): decideRoute() with workerProfile={}
  *
- * ─── Failure behavior ─────────────────────────────────────────────────────────
+ *  On RecoveryOutcome.succeeded:
+ *  4a. jobLifecycle.assignJob()          — Routing|Retrying → Assigned
+ *  5a. return AssignedJobOutcome
  *
- *   If the routing decision engine throws (NoEligibleModel, NoEligibleWorker,
- *   NoActivePolicy, NotFoundError), this service:
- *     1. Moves the job to Failed (Routing → Failed is a valid transition)
- *     2. Re-throws the original error for the HTTP layer to handle
+ *  On RecoveryOutcome.failed + retryable + attempts < maxAttempts:
+ *  4b. jobLifecycle.failJob()            — Routing|Retrying → Failed
+ *  5b. jobLifecycle.retryJob()           — Failed → Retrying
+ *  6b. jobsService.incrementRetryCount() — bump attempt counter
+ *  7b. return RetryingJobOutcome         — caller returns 202 Accepted
  *
- *   Failed jobs are inspectable. The caller may subsequently invoke
- *   jobLifecycle.retryJob() to attempt routing again if desired.
+ *  On RecoveryOutcome.failed + terminal:
+ *  4c. jobLifecycle.failJob()            — Routing|Retrying → Failed
+ *  5c. throw original routing error
  *
- * ─── Reusability ──────────────────────────────────────────────────────────────
+ * ─── State machine invariants ─────────────────────────────────────────────────
  *
- *   The service is stateless. Pass DecisionSource.Simulation and a
- *   policyOverride to replay routing for offline analysis without
- *   changing any live job state.
+ *   Queued   → Routing → Assigned              (success, first attempt)
+ *   Queued   → Routing → Failed → Retrying     (retryable failure, first attempt)
+ *   Retrying →          → Assigned             (success on retry)
+ *   Retrying →          → Failed               (terminal failure on retry)
  *
  * ─── Error handling ───────────────────────────────────────────────────────────
  *
- *   JobNotRoutableError  (409) — job exists but is not in Queued status
- *   NotFoundError        (404) — jobId does not exist (from jobsService)
- *   NoActivePolicyError  (503) — no routing policy active, no override given
- *   NotFoundError        (404) — policyOverride name/ID does not exist
- *   NoEligibleModelError (422) — no model passes the filter + hard constraints
- *   NoEligibleWorkerError(422) — no worker supports the selected model
+ *   JobNotRoutableError  (409) — job not in Queued or Retrying status
+ *   NotFoundError        (404) — jobId does not exist
+ *   NoActivePolicyError  (503) — no routing policy active (terminal)
+ *   NotFoundError        (404) — policyOverride name/ID does not exist (terminal)
+ *   NoEligibleModelError (422) — no model passes constraints (retryable)
+ *   NoEligibleWorkerError(422) — no worker available (retryable, fallback first)
  */
 
 import type { RequestContext } from "../../../core/context";
@@ -47,8 +52,14 @@ import { JobStatus } from "../../../shared/contracts/job";
 import { DecisionSource } from "../../../shared/contracts/routing";
 import type { JobsService } from "../service/jobs.service";
 import type { JobLifecycleService } from "../lifecycle/job-lifecycle.service";
-import type { RoutingDecisionService } from "../../routing/decision/routing-decision.service";
-import type { RouteJobInput, RouteJobResult } from "./job-routing.contract";
+import type { RoutingRecoveryService } from "./recovery/routing-recovery.service";
+import { RoutingFailureClass } from "./recovery/routing-recovery.contract";
+import type {
+  AssignedJobOutcome,
+  RetryingJobOutcome,
+  RouteJobInput,
+  RouteJobResult,
+} from "./job-routing.contract";
 import { JobNotRoutableError } from "./job-routing.contract";
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -57,122 +68,165 @@ export class JobRoutingService {
   constructor(
     private readonly jobsService: JobsService,
     private readonly jobLifecycle: JobLifecycleService,
-    private readonly routingDecision: RoutingDecisionService,
+    private readonly recoveryService: RoutingRecoveryService,
   ) {}
 
   /**
-   * Route a queued job to the best available (model, worker) pair.
+   * Route a queued or retrying job to the best available (model, worker) pair.
    *
-   * @throws {JobNotRoutableError}    — job is not in Queued status
+   * Returns `AssignedJobOutcome` on success (possibly via fallback) or
+   * `RetryingJobOutcome` when the job has been scheduled for a retry.
+   * Throws the original routing error when recovery is exhausted or
+   * the failure is non-retryable.
+   *
+   * @throws {JobNotRoutableError}    — job is not in Queued or Retrying status
    * @throws {NotFoundError}          — jobId or policyOverride does not exist
-   * @throws {NoActivePolicyError}    — no active routing policy found
-   * @throws {NoEligibleModelError}   — no eligible model candidate available
-   * @throws {NoEligibleWorkerError}  — no eligible worker candidate available
+   * @throws {NoActivePolicyError}    — no active routing policy found (terminal)
+   * @throws {NoEligibleModelError}   — no eligible model available (after retry exhaustion)
+   * @throws {NoEligibleWorkerError}  — no eligible worker available (after retry exhaustion)
    */
   async routeJob(ctx: RequestContext, input: RouteJobInput): Promise<RouteJobResult> {
     // ── 1. Load job and validate state ────────────────────────────────────────
     const job = await this.jobsService.getById(ctx, input.jobId);
+    const isRetryAttempt = job.status === JobStatus.Retrying;
 
-    if (job.status !== JobStatus.Queued) {
+    if (job.status !== JobStatus.Queued && job.status !== JobStatus.Retrying) {
       throw new JobNotRoutableError(job.id, job.status);
     }
 
     ctx.log.info(
-      { jobId: job.id, requestId: job.requestId },
+      { jobId: job.id, requestId: job.requestId, attempt: job.attempts, isRetryAttempt },
       "Beginning job routing",
     );
 
-    // ── 2. Transition to Routing ───────────────────────────────────────────────
-    await this.jobLifecycle.moveToRouting(ctx, job.id, {
-      source: "job_routing_service",
+    // ── 2. Transition to Routing (first attempts only) ────────────────────────
+    // Retrying jobs skip this — Retrying → Assigned is valid without going
+    // through Routing again.
+    if (!isRetryAttempt) {
+      await this.jobLifecycle.moveToRouting(ctx, job.id, {
+        source: "job_routing_service",
+      });
+    }
+
+    // ── 3. Attempt routing with recovery (primary + optional fallback) ────────
+    const recovery = await this.recoveryService.attemptWithRecovery(ctx, {
+      requestId: job.requestId,
+      jobId: job.id,
+      decisionSource: input.decisionSource ?? DecisionSource.Live,
+      policyOverride: input.policyOverride,
     });
 
-    // ── 3. Invoke the routing decision engine ─────────────────────────────────
-    let decisionResult;
-    try {
-      decisionResult = await this.routingDecision.decideRoute(ctx, {
-        requestId: job.requestId,
-        jobId: job.id,
-        decisionSource: input.decisionSource ?? DecisionSource.Live,
-        policyOverride: input.policyOverride,
-      });
-    } catch (err) {
-      // Routing failed — move to Failed so the job is not stuck in Routing.
-      // The caller can inspect the failureCode and call retryJob() if appropriate.
-      ctx.log.warn(
-        { jobId: job.id, err },
-        "Routing decision failed — transitioning job to Failed",
-      );
+    // ── 4a. Success path — assign the job ─────────────────────────────────────
+    if (recovery.status === "succeeded") {
+      const { selectedModelId, selectedWorkerId } = recovery.result.decision;
+      if (!selectedModelId || !selectedWorkerId) {
+        throw new Error("Routing decision returned without model or worker selection");
+      }
 
-      await this.jobLifecycle.failJob(
+      const assigned = await this.jobLifecycle.assignJob(
         ctx,
         job.id,
-        {
-          code: toFailureCode(err),
-          reason: err instanceof Error ? err.message : "Routing decision failed",
-        },
+        selectedModelId,
+        selectedWorkerId,
+        recovery.result.decision.id,
         { source: "job_routing_service" },
       );
 
-      throw err;
+      ctx.log.info(
+        {
+          jobId: job.id,
+          selectedModelId,
+          selectedWorkerId,
+          decisionId: recovery.result.decision.id,
+          usedFallback: recovery.info?.usedFallback ?? false,
+          evaluationMs: recovery.result.evaluationMs,
+        },
+        "Job successfully routed and assigned",
+      );
+
+      return {
+        outcome: "assigned",
+        job: assigned,
+        decision: recovery.result.decision,
+        modelSummary: recovery.result.modelSummary,
+        workerSummary: recovery.result.workerSummary,
+        evaluationMs: recovery.result.evaluationMs,
+        recovery: recovery.info,
+      } satisfies AssignedJobOutcome;
     }
 
-    // ── 4. Transition to Assigned ──────────────────────────────────────────────
-    // selectedModelId/selectedWorkerId are always set for a Routed outcome,
-    // but the RoutingDecision contract types them as optional for other outcomes.
-    const { selectedModelId, selectedWorkerId } = decisionResult.decision;
-    if (!selectedModelId || !selectedWorkerId) {
-      throw new Error("Routing decision returned without model or worker selection");
-    }
+    // ── 4b/4c. Failure path — decide: retry or terminal ──────────────────────
+    const { info, error, retryEligible } = recovery;
+    const canScheduleRetry = retryEligible && job.attempts < job.maxAttempts;
 
-    const assigned = await this.jobLifecycle.assignJob(
+    ctx.log.warn(
+      {
+        jobId: job.id,
+        failureClass: info.primaryFailureClass,
+        usedFallback: info.usedFallback,
+        attempt: job.attempts,
+        maxAttempts: job.maxAttempts,
+        canScheduleRetry,
+      },
+      "Routing recovery failed — determining terminal vs retry outcome",
+    );
+
+    // Always move to Failed first (valid from both Routing and Retrying states)
+    await this.jobLifecycle.failJob(
       ctx,
       job.id,
-      selectedModelId,
-      selectedWorkerId,
-      decisionResult.decision.id,
+      {
+        code: toFailureCode(info.primaryFailureClass),
+        reason: info.primaryFailureReason,
+      },
       { source: "job_routing_service" },
     );
 
-    ctx.log.info(
-      {
-        jobId: job.id,
-        selectedModelId,
-        selectedWorkerId,
-        decisionId: decisionResult.decision.id,
-        evaluationMs: decisionResult.evaluationMs,
-      },
-      "Job successfully routed and assigned",
+    if (canScheduleRetry) {
+      // ── 4b. Schedule retry ─────────────────────────────────────────────────
+      await this.jobLifecycle.retryJob(ctx, job.id, {
+        source: "job_routing_service",
+        reason: info.primaryFailureReason,
+      });
+
+      // Increment attempt counter and use the updated snapshot as the returned
+      // job so that outcome.job.attempts is consistent with nextAttemptNumber.
+      const jobWithCount = await this.jobsService.incrementRetryCount(ctx, job.id);
+
+      ctx.log.info(
+        { jobId: job.id, nextAttempt: job.attempts + 1, maxAttempts: job.maxAttempts },
+        "Routing retry scheduled",
+      );
+
+      return {
+        outcome: "retrying",
+        job: jobWithCount,
+        nextAttemptNumber: job.attempts + 1,
+        retryReason: info.primaryFailureReason,
+        recovery: info,
+      } satisfies RetryingJobOutcome;
+    }
+
+    // ── 4c. Terminal failure ───────────────────────────────────────────────────
+    ctx.log.error(
+      { jobId: job.id, failureClass: info.primaryFailureClass, attempt: job.attempts },
+      "Routing recovery exhausted — job marked Failed",
     );
 
-    return {
-      job: assigned,
-      decision: decisionResult.decision,
-      modelSummary: decisionResult.modelSummary,
-      workerSummary: decisionResult.workerSummary,
-      evaluationMs: decisionResult.evaluationMs,
-    };
+    throw error;
   }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Maps a routing-layer error to a short, structured failure code stamped onto
- * the job record. These codes are inspectable without parsing error messages.
- */
-function toFailureCode(err: unknown): string {
-  if (err instanceof Error) {
-    switch (err.name) {
-      case "NoActivePolicyError":
-        return "NO_ACTIVE_POLICY";
-      case "NoEligibleModelError":
-        return "NO_ELIGIBLE_MODEL";
-      case "NoEligibleWorkerError":
-        return "NO_ELIGIBLE_WORKER";
-      case "NotFoundError":
-        return "POLICY_NOT_FOUND";
-    }
+function toFailureCode(fc: RoutingFailureClass): string {
+  switch (fc) {
+    case RoutingFailureClass.NoEligibleModel:    return "NO_ELIGIBLE_MODEL";
+    case RoutingFailureClass.NoEligibleWorker:   return "NO_ELIGIBLE_WORKER";
+    case RoutingFailureClass.PolicyBlocked:      return "NO_ACTIVE_POLICY";
+    case RoutingFailureClass.PolicyNotFound:     return "POLICY_NOT_FOUND";
+    case RoutingFailureClass.AssignmentConflict: return "ASSIGNMENT_CONFLICT";
+    case RoutingFailureClass.TemporaryCapacity:  return "TEMPORARY_CAPACITY";
+    default:                                     return "ROUTING_FAILED";
   }
-  return "ROUTING_FAILED";
 }

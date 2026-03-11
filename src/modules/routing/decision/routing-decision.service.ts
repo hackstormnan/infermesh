@@ -284,7 +284,8 @@ export class RoutingDecisionService {
       selectedModelId: bestModel.candidateId as unknown as ModelId,
       selectedWorkerId: bestWorker.candidateId as unknown as WorkerId,
       strategy: policy.strategy,
-      usedFallback: false,
+      usedFallback: input.usedFallback ?? false,
+      fallbackReason: input.fallbackReason,
       candidates: [
         {
           modelId: bestModel.candidateId as unknown as ModelId,

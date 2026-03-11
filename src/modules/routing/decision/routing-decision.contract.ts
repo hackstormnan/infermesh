@@ -74,6 +74,13 @@ export interface DecideRouteInput {
   modelWeights?: ModelScoringWeights;
   /** Per-dimension scoring weights for worker evaluation */
   workerWeights?: WorkerScoringWeights;
+  /**
+   * Set by the recovery layer when this call is a fallback routing attempt.
+   * Propagated into the persisted RoutingDecision record for full audit integrity.
+   */
+  usedFallback?: boolean;
+  /** Human-readable explanation of why the fallback was triggered */
+  fallbackReason?: string;
 }
 
 // ─── Output ───────────────────────────────────────────────────────────────────
