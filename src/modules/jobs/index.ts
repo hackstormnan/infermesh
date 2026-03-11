@@ -11,8 +11,7 @@
  *
  * ─── Key consumers ───────────────────────────────────────────────────────────
  * - Intake module: calls jobsService.createJob() to initialize a new job
- * - Routing engine (future): calls jobLifecycleService.moveToRouting() then
- *   jobLifecycleService.assignJob() as part of the evaluate() dispatch flow
+ * - Job routing: calls jobRoutingService.routeJob() to route a Queued job
  * - Execution layer (future): calls jobLifecycleService.startJob(),
  *   jobLifecycleService.completeJob(), jobLifecycleService.failJob()
  * - Dashboard / monitoring clients: call the /jobs/* REST endpoints
@@ -25,10 +24,12 @@
  * ─── Services ────────────────────────────────────────────────────────────────
  *   jobsService          — CRUD + read operations (createJob, getById, list)
  *   jobLifecycleService  — All status transitions with validation + history
+ *   jobRoutingService    — Orchestrates routing: Queued → Routing → Assigned
  *
  * ─── API surface ─────────────────────────────────────────────────────────────
- *   GET /api/v1/jobs/:id   — fetch a single job by UUID
- *   GET /api/v1/jobs       — paginated list with status/worker/model/request filters
+ *   GET  /api/v1/jobs/:id        — fetch a single job by UUID
+ *   GET  /api/v1/jobs            — paginated list with status/worker/model/request filters
+ *   POST /api/v1/jobs/:id/route  — route a queued job to the best (model, worker) pair
  *
  * ─── Wiring ──────────────────────────────────────────────────────────────────
  * Register routes in app/routes.ts:
@@ -40,6 +41,8 @@ import { InMemoryJobRepository } from "./repository/InMemoryJobRepository";
 import { JobsService } from "./service/jobs.service";
 import { buildJobsRoute } from "./routes/jobs.route";
 import { JobLifecycleService } from "./lifecycle/job-lifecycle.service";
+import { JobRoutingService } from "./orchestration/job-routing.service";
+import { routingDecisionService } from "../routing";
 
 // ─── Module composition ───────────────────────────────────────────────────────
 
@@ -54,8 +57,22 @@ export const jobsService = new JobsService(jobsRepo);
  */
 export const jobLifecycleService = new JobLifecycleService(jobsRepo);
 
+/**
+ * Singleton routing orchestrator — routes a Queued job through the decision
+ * engine and transitions it to Assigned with model/worker/decision stamped.
+ *
+ * Usage:
+ *   const result = await jobRoutingService.routeJob(ctx, { jobId: "job-123" });
+ *   // result.job — now Assigned; result.decision — persisted routing decision
+ */
+export const jobRoutingService = new JobRoutingService(
+  jobsService,
+  jobLifecycleService,
+  routingDecisionService,
+);
+
 /** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
-export const jobsRoute = buildJobsRoute(jobsService);
+export const jobsRoute = buildJobsRoute(jobsService, jobRoutingService);
 
 // ─── Public type re-exports ───────────────────────────────────────────────────
 
@@ -83,3 +100,14 @@ export type { JobDto, CreateJobDto } from "./service/jobs.service";
 export { JobLifecycleService } from "./lifecycle/job-lifecycle.service";
 export type { TransitionMeta, FailureInfo } from "./lifecycle/job-lifecycle.service";
 export { InvalidTransitionError, canTransition, isTerminal, ALLOWED_TRANSITIONS } from "./lifecycle/transitions";
+
+// ─── Job routing orchestration exports ───────────────────────────────────────
+
+export { JobRoutingService } from "./orchestration/job-routing.service";
+
+export type {
+  RouteJobInput,
+  RouteJobResult,
+} from "./orchestration/job-routing.contract";
+
+export { JobNotRoutableError } from "./orchestration/job-routing.contract";
