@@ -23,6 +23,7 @@ import type {
   TimeSeriesData,
 } from "../service/metrics.service";
 import type { MetricsService } from "../service/metrics.service";
+import type { AnalyticsAggregationService } from "../analytics/analytics-aggregation.service";
 
 /** Shared querystring JSON Schema fragment used by all four routes */
 const periodQuerySchema = {
@@ -38,12 +39,18 @@ const periodQuerySchema = {
 
 /**
  * Factory that creates a Fastify plugin for metrics routes.
- * Accepts the service as a dependency for testability.
+ *
+ * @param service    — stub MetricsService (fallback when analytics is absent)
+ * @param analytics  — optional real-data aggregation service; when provided, all
+ *                     four routes delegate to it instead of the stub service.
  *
  * Register in app/routes.ts:
- *   fastify.register(buildMetricsRoute(metricsService), { prefix: "/api/v1" });
+ *   fastify.register(buildMetricsRoute(metricsService, analyticsService), { prefix: "/api/v1" });
  */
-export function buildMetricsRoute(service: MetricsService): FastifyPluginAsync {
+export function buildMetricsRoute(
+  service: MetricsService,
+  analytics?: AnalyticsAggregationService,
+): FastifyPluginAsync {
   return async (fastify) => {
     // ── GET /metrics/summary ──────────────────────────────────────────────────
 
@@ -75,7 +82,9 @@ export function buildMetricsRoute(service: MetricsService): FastifyPluginAsync {
       },
       async (request) => {
         const query = metricsQuerySchema.parse(request.query);
-        const data = await service.getSummary(request.ctx, query);
+        const data = analytics
+          ? await analytics.getSummary(request.ctx, query)
+          : await service.getSummary(request.ctx, query);
         return successResponse(data, buildMeta(request.id as string));
       },
     );
@@ -110,7 +119,9 @@ export function buildMetricsRoute(service: MetricsService): FastifyPluginAsync {
       },
       async (request) => {
         const query = metricsQuerySchema.parse(request.query);
-        const data = await service.getTimeSeries(request.ctx, query);
+        const data = analytics
+          ? await analytics.getTimeSeries(request.ctx, query)
+          : await service.getTimeSeries(request.ctx, query);
         return successResponse(data, buildMeta(request.id as string));
       },
     );
@@ -145,7 +156,9 @@ export function buildMetricsRoute(service: MetricsService): FastifyPluginAsync {
       },
       async (request) => {
         const query = metricsQuerySchema.parse(request.query);
-        const data = await service.getLatencyPercentiles(request.ctx, query);
+        const data = analytics
+          ? await analytics.getLatencyPercentiles(request.ctx, query)
+          : await service.getLatencyPercentiles(request.ctx, query);
         return successResponse(data, buildMeta(request.id as string));
       },
     );
@@ -180,7 +193,9 @@ export function buildMetricsRoute(service: MetricsService): FastifyPluginAsync {
       },
       async (request) => {
         const query = metricsQuerySchema.parse(request.query);
-        const data = await service.getCostBreakdown(request.ctx, query);
+        const data = analytics
+          ? await analytics.getCostBreakdown(request.ctx, query)
+          : await service.getCostBreakdown(request.ctx, query);
         return successResponse(data, buildMeta(request.id as string));
       },
     );

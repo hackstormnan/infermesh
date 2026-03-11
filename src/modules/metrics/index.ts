@@ -34,16 +34,30 @@
 import { InMemoryMetricsRepository } from "./repository/InMemoryMetricsRepository";
 import { MetricsService } from "./service/metrics.service";
 import { buildMetricsRoute } from "./routes/metrics.route";
+import { AnalyticsAggregationService } from "./analytics/analytics-aggregation.service";
+import { requestsService } from "../requests";
+import { jobsService } from "../jobs";
+import { modelsService } from "../models";
 
 // ─── Module composition ───────────────────────────────────────────────────────
 
 const metricsRepo = new InMemoryMetricsRepository();
 
-/** Singleton service instance — shared across the process lifetime */
+/** Stub service — retained for backward compatibility and as fallback */
 export const metricsService = new MetricsService(metricsRepo);
 
+/**
+ * Real-data analytics service — aggregates from live in-memory repositories.
+ * Injected into metricsRoute; takes precedence over the stub metricsService.
+ */
+export const analyticsService = new AnalyticsAggregationService(
+  requestsService,
+  jobsService,
+  modelsService,
+);
+
 /** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
-export const metricsRoute = buildMetricsRoute(metricsService);
+export const metricsRoute = buildMetricsRoute(metricsService, analyticsService);
 
 // ─── Public type re-exports ───────────────────────────────────────────────────
 
@@ -72,3 +86,9 @@ export type { MetricsQuery } from "./queries";
 export { metricsQuerySchema, METRIC_PERIODS, PERIOD_DURATION_MS, PERIOD_GRANULARITY_MS } from "./queries";
 
 export type { IMetricsRepository } from "./repository/IMetricsRepository";
+
+// ─── Analytics aggregation exports ───────────────────────────────────────────
+
+export { AnalyticsAggregationService } from "./analytics/analytics-aggregation.service";
+export { FETCH_LIMIT, generateBuckets, computePercentile, deriveJobCost } from "./analytics/analytics-aggregation.service";
+export type { BucketRange } from "./analytics/analytics-aggregation.service";
