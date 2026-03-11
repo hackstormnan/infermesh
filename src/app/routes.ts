@@ -20,6 +20,28 @@ import { jobsRoute } from "../modules/jobs";
 import { intakeRoute } from "../modules/intake";
 import { queueRoute } from "../modules/queue";
 import { statsRoute } from "../modules/stats";
+import {
+  streamGateway,
+  ConnectionRegistry,
+  InMemoryStreamBroker,
+} from "../stream";
+
+// ─── Stream gateway singletons ────────────────────────────────────────────────
+//
+// Created once per server instance (i.e. once per buildServer() call) so tests
+// each get an isolated registry and broker with no shared state.
+//
+// The broker is exported so domain services can receive it via constructor
+// injection in future tickets (e.g. IntakeService, WorkersService, RoutingDecisionService).
+//
+// Future: replace InMemoryStreamBroker with a Redis-backed or Kafka-backed
+//         implementation without touching any call sites that depend on IStreamBroker.
+
+export function createStreamServices() {
+  const registry = new ConnectionRegistry();
+  const broker = new InMemoryStreamBroker(registry);
+  return { registry, broker };
+}
 
 export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // Infrastructure routes (no versioned prefix — used by load balancers / k8s probes)
@@ -39,4 +61,19 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   await fastify.register(metricsRoute, { prefix: "/api/v1" });
   await fastify.register(jobsRoute, { prefix: "/api/v1" });
   await fastify.register(statsRoute, { prefix: "/api/v1" });
+
+  // ── Stream gateway — WebSocket + internal emit ──────────────────────────────
+  //
+  // Upgrade path: ws://host/api/v1/stream
+  // Internal endpoints: POST /api/v1/internal/stream/emit
+  //                     GET  /api/v1/internal/stream/status
+  //
+  // The gateway holds its own registry and broker instances so future tickets
+  // can inject the broker into domain services for publish-on-event wiring.
+  const { registry, broker } = createStreamServices();
+  await fastify.register(streamGateway, {
+    prefix: "/api/v1",
+    registry,
+    broker,
+  });
 }

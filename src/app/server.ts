@@ -19,6 +19,7 @@
  */
 
 import Fastify from "fastify";
+import fastifyWebsocket from "@fastify/websocket";
 import { config } from "../core/config";
 import { contextPlugin } from "../core/context";
 import { errorHandler, notFoundHandler } from "../core/errors";
@@ -45,6 +46,9 @@ export async function buildServer() {
   // ── Global plugins ────────────────────────────────────────────────────────
   // RequestContext decorator — must be registered before routes
   await fastify.register(contextPlugin);
+
+  // WebSocket support — must be registered before any WebSocket route plugins
+  await fastify.register(fastifyWebsocket);
 
   // Echo resolved request ID back as a response header for client correlation
   await echoRequestIdHook(fastify);
