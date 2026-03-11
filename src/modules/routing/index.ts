@@ -40,6 +40,8 @@ import { RoutingService } from "./service/routing.service";
 import { buildRoutingRoute } from "./routes/routing.route";
 import { CandidateEvaluatorService } from "./evaluation/candidate-evaluator.service";
 import { RoutingDecisionService } from "./decision/routing-decision.service";
+import { InMemoryDecisionEvaluationStore } from "./decision/InMemoryDecisionEvaluationStore";
+import { DecisionHistoryService } from "./decision/decision-history.service";
 import { modelRegistryService } from "../models";
 import { workerRegistryService } from "../workers";
 
@@ -51,8 +53,12 @@ const decisionRepo = new InMemoryDecisionRepository();
 /** Singleton service instance — shared across the process lifetime */
 export const routingService = new RoutingService(policyRepo, decisionRepo);
 
-/** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
-export const routingRoute = buildRoutingRoute(routingService);
+/**
+ * Singleton evaluation store — persists full ModelScoreResult[] and
+ * WorkerScoreResult[] alongside each decision for the history layer.
+ * In-process only; replace with a durable store for production.
+ */
+export const decisionEvaluationStore = new InMemoryDecisionEvaluationStore();
 
 /**
  * Stateless candidate evaluation service — scores ModelCandidate[] and
@@ -63,7 +69,8 @@ export const candidateEvaluatorService = new CandidateEvaluatorService();
 
 /**
  * Routing decision engine — resolves the active policy, evaluates candidates,
- * selects the best (model, worker) pair, and records an immutable RoutingDecision.
+ * selects the best (model, worker) pair, records an immutable RoutingDecision,
+ * and persists the full evaluation for the history layer.
  *
  * Primary entry point for live routing and simulation replay.
  *
@@ -82,7 +89,22 @@ export const routingDecisionService = new RoutingDecisionService(
   modelRegistryService,
   workerRegistryService,
   candidateEvaluatorService,
+  decisionEvaluationStore,
 );
+
+/**
+ * Decision history service — builds explanation-rich DecisionDetailDto responses
+ * by merging core decision records with full evaluation breakdowns.
+ *
+ * Used by GET /routing/decisions/:id and GET /routing/decisions.
+ */
+export const decisionHistoryService = new DecisionHistoryService(
+  routingService,
+  decisionEvaluationStore,
+);
+
+/** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
+export const routingRoute = buildRoutingRoute(routingService, decisionHistoryService);
 
 // ─── Public type re-exports ───────────────────────────────────────────────────
 
@@ -157,3 +179,16 @@ export {
   NoEligibleModelError,
   NoEligibleWorkerError,
 } from "./decision/routing-decision.contract";
+
+// ─── Decision history exports ─────────────────────────────────────────────────
+
+export { DecisionHistoryService } from "./decision/decision-history.service";
+export { InMemoryDecisionEvaluationStore } from "./decision/InMemoryDecisionEvaluationStore";
+
+export type {
+  DecisionDetailDto,
+  CandidateEvaluationSection,
+  CandidateScoreSummary,
+  RoutingDecisionEvaluation,
+  IDecisionEvaluationStore,
+} from "./decision/decision-history.contract";

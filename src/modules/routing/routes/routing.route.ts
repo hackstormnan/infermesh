@@ -24,19 +24,27 @@ import {
   listPoliciesQuerySchema,
 } from "../queries";
 import type {
-  RoutingDecisionDto,
   RoutingPolicyDto,
   RoutingService,
 } from "../service/routing.service";
+import type { DecisionHistoryService } from "../decision/decision-history.service";
+import type { DecisionDetailDto } from "../decision/decision-history.contract";
 
 /**
  * Factory that creates a Fastify plugin for routing routes.
- * Accepts the service as a dependency for testability.
+ *
+ * @param service         — routing service (policies + basic decision reads)
+ * @param historyService  — optional decision history service; when provided,
+ *                          GET /routing/decisions routes return explanation-rich
+ *                          DecisionDetailDto responses instead of bare entities.
  *
  * Register in app/routes.ts:
- *   fastify.register(buildRoutingRoute(routingService), { prefix: "/api/v1" });
+ *   fastify.register(buildRoutingRoute(routingService, decisionHistoryService), { prefix: "/api/v1" });
  */
-export function buildRoutingRoute(service: RoutingService): FastifyPluginAsync {
+export function buildRoutingRoute(
+  service: RoutingService,
+  historyService?: DecisionHistoryService,
+): FastifyPluginAsync {
   return async (fastify) => {
     // ── GET /routing/policies/:id ──────────────────────────────────────────
 
@@ -121,10 +129,12 @@ export function buildRoutingRoute(service: RoutingService): FastifyPluginAsync {
     );
 
     // ── GET /routing/decisions/:id ─────────────────────────────────────────
+    // Returns DecisionDetailDto (explanation-rich) when historyService is wired,
+    // falls back to bare RoutingDecision when it is not.
 
     fastify.get<{
       Params: { id: string };
-      Reply: ReturnType<typeof successResponse<RoutingDecisionDto>>;
+      Reply: ReturnType<typeof successResponse<DecisionDetailDto>>;
     }>(
       "/routing/decisions/:id",
       {
@@ -153,16 +163,19 @@ export function buildRoutingRoute(service: RoutingService): FastifyPluginAsync {
         },
       },
       async (request) => {
-        const dto = await service.getDecision(request.ctx, request.params.id);
-        return successResponse(dto, buildMeta(request.id as string));
+        const dto = historyService
+          ? await historyService.getDecisionDetail(request.ctx, request.params.id)
+          : await service.getDecision(request.ctx, request.params.id);
+        return successResponse(dto as DecisionDetailDto, buildMeta(request.id as string));
       },
     );
 
     // ── GET /routing/decisions ─────────────────────────────────────────────
+    // Returns paginated DecisionDetailDto list when historyService is wired.
 
     fastify.get<{
       Querystring: Record<string, string | undefined>;
-      Reply: ReturnType<typeof successResponse<PaginatedResponse<RoutingDecisionDto>>>;
+      Reply: ReturnType<typeof successResponse<PaginatedResponse<DecisionDetailDto>>>;
     }>(
       "/routing/decisions",
       {
@@ -173,9 +186,12 @@ export function buildRoutingRoute(service: RoutingService): FastifyPluginAsync {
               page: { type: "string" },
               limit: { type: "string" },
               requestId: { type: "string" },
+              jobId: { type: "string" },
               outcome: { type: "string" },
               policyId: { type: "string" },
               decisionSource: { type: "string" },
+              selectedModelId: { type: "string" },
+              selectedWorkerId: { type: "string" },
               from: { type: "string" },
               to: { type: "string" },
             },
@@ -200,8 +216,13 @@ export function buildRoutingRoute(service: RoutingService): FastifyPluginAsync {
       },
       async (request) => {
         const query = listDecisionsQuerySchema.parse(request.query);
-        const result = await service.listDecisions(request.ctx, query);
-        return successResponse(result, buildMeta(request.id as string));
+        const result = historyService
+          ? await historyService.listDecisionDetails(request.ctx, query)
+          : await service.listDecisions(request.ctx, query);
+        return successResponse(
+          result as PaginatedResponse<DecisionDetailDto>,
+          buildMeta(request.id as string),
+        );
       },
     );
   };

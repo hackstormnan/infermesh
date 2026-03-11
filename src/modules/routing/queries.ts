@@ -67,6 +67,24 @@ export const listDecisionsQuerySchema = paginationQuerySchema.extend({
   decisionSource: z.nativeEnum(DecisionSource).optional(),
 
   /**
+   * Filter decisions associated with a specific job.
+   * A job may produce more than one decision (primary + fallback routing attempt).
+   */
+  jobId: z.string().optional(),
+
+  /**
+   * Filter by the model that was selected.
+   * Useful for auditing all traffic routed to a specific model.
+   */
+  selectedModelId: z.string().optional(),
+
+  /**
+   * Filter by the worker that was selected.
+   * Useful for auditing all decisions assigned to a specific worker.
+   */
+  selectedWorkerId: z.string().optional(),
+
+  /**
    * Start of time window (Unix epoch ms).
    * Only decisions recorded at or after this timestamp are returned.
    */

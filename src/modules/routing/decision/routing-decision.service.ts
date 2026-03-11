@@ -78,6 +78,7 @@ import {
   NoEligibleModelError,
   NoEligibleWorkerError,
 } from "./routing-decision.contract";
+import type { IDecisionEvaluationStore } from "./decision-history.contract";
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -88,6 +89,13 @@ export class RoutingDecisionService {
     private readonly modelRegistry: ModelRegistryService,
     private readonly workerRegistry: WorkerRegistryService,
     private readonly evaluator: CandidateEvaluatorService,
+    /**
+     * Optional evaluation store. When provided, the full model and worker score
+     * arrays are persisted alongside each decision so DecisionHistoryService
+     * can build explanation-rich DTOs for the history API.
+     * Absent in tests and legacy wiring — gracefully skipped when null.
+     */
+    private readonly evaluationStore: IDecisionEvaluationStore | null = null,
   ) {}
 
   /**
@@ -205,6 +213,18 @@ export class RoutingDecisionService {
     const evaluationMs = Date.now() - start;
     const decision = this.buildDecision(input, policy, bestModel, bestWorker, evaluationMs);
     const saved = await this.decisionRepo.save(decision);
+
+    // Persist full evaluation alongside the decision so the history layer can
+    // produce explanation-rich DTOs with all candidates and disqualification
+    // reasons — not just the winner.
+    if (this.evaluationStore) {
+      await this.evaluationStore.save({
+        decisionId: saved.id,
+        modelScores,
+        workerScores,
+        savedAt: Date.now(),
+      });
+    }
 
     ctx.log.info(
       {
