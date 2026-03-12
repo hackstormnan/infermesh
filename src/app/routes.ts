@@ -20,6 +20,7 @@ import { buildJobsModule } from "../modules/jobs";
 import { buildIntakeModule } from "../modules/intake";
 import { queueRoute } from "../modules/queue";
 import { statsRoute } from "../modules/stats";
+import { simulationRoute } from "../modules/simulation";
 import {
   streamGateway,
   ConnectionRegistry,
@@ -70,6 +71,8 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // Jobs — receives the broker so POST /jobs/:id/route publishes "decisions" events.
   await fastify.register(buildJobsModule(broker), { prefix: "/api/v1" });
   await fastify.register(statsRoute, { prefix: "/api/v1" });
+  // Simulation — offline routing policy evaluation; no broker needed.
+  await fastify.register(simulationRoute, { prefix: "/api/v1" });
 
   // ── Stream gateway — WebSocket + internal emit ──────────────────────────────
   //

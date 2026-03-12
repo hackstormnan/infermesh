@@ -1,0 +1,178 @@
+/**
+ * modules/simulation/contract.ts
+ *
+ * Input/output contracts for the routing simulation engine.
+ *
+ * The simulation engine runs synthetic workloads through the routing decision
+ * logic without touching live requests, jobs, or worker state. Results are
+ * ephemeral — they are returned to the caller and not persisted to the live
+ * routing decision log.
+ *
+ * ─── Key types ────────────────────────────────────────────────────────────────
+ *   SimulationRunInput    — what to simulate (policy, workload, overrides)
+ *   SimulationRunResult   — aggregate outcome of the simulation run
+ *   WorkloadDefinition    — per-request parameters applied to every iteration
+ *   SimulationError       — structured failure record for individual requests
+ *
+ * ─── Isolation guarantees ────────────────────────────────────────────────────
+ *   - No live InferenceRequest or Job records are created
+ *   - Routing decisions are persisted to a run-scoped in-memory repo, not the
+ *     live IDecisionRepository — they vanish when the run completes
+ *   - All decisions carry DecisionSource.Simulation for audit traceability
+ *   - No stream events are published (no broker is injected)
+ */
+
+import { z } from "zod";
+import type { ModelCandidate } from "../models/registry/model-registry.contract";
+import type { WorkerCandidate } from "../workers/registry/worker-registry.contract";
+import type { ModelRegistryFilter } from "../models/registry/model-registry.contract";
+import type { WorkerAssignmentFilter } from "../workers/registry/worker-registry.contract";
+
+// ─── Workload ──────────────────────────────────────────────────────────────────
+
+/**
+ * Per-request configuration applied to every iteration in the simulation run.
+ *
+ * Filters narrow the candidate pools used during each routing evaluation —
+ * useful for testing a policy under workloads that require specific model
+ * capabilities or worker regions.
+ */
+export interface WorkloadDefinition {
+  /** Prefix used when generating synthetic request IDs (default: "sim") */
+  requestIdPrefix?: string;
+  /** Narrows the model candidate pool for every simulated request */
+  modelFilter?: ModelRegistryFilter;
+  /**
+   * Narrows the worker candidate pool for every simulated request.
+   * `requiredModelId` is set automatically by the routing engine and must
+   * not be included here.
+   */
+  workerFilter?: Omit<WorkerAssignmentFilter, "requiredModelId">;
+}
+
+// ─── Input ────────────────────────────────────────────────────────────────────
+
+/**
+ * Input to a single simulation run.
+ *
+ * `modelOverrides` and `workerOverrides` replace the live registry lookups
+ * with a fixed candidate list, enabling policy evaluation under controlled
+ * synthetic infrastructure states without modifying live worker or model data.
+ */
+export interface SimulationRunInput {
+  /** Human-readable name for this scenario (e.g. "cost-policy-peak-load") */
+  scenarioName: string;
+  /**
+   * Policy name or UUID to evaluate. Defaults to the highest-priority active
+   * policy when omitted — same resolution as the live routing path.
+   */
+  policyId?: string;
+  /**
+   * Number of synthetic requests to route through the engine.
+   * Each request is routed independently; there is no shared state between
+   * iterations (worker load is not updated between requests).
+   */
+  requestCount: number;
+  /** Per-request configuration applied uniformly to every iteration */
+  workload?: WorkloadDefinition;
+  /**
+   * Fixed model candidate list. When provided, the live model registry is
+   * bypassed — only these candidates are considered for every simulated request.
+   */
+  modelOverrides?: ModelCandidate[];
+  /**
+   * Fixed worker candidate list. When provided, the live worker registry is
+   * bypassed — only these candidates are considered for every simulated request.
+   */
+  workerOverrides?: WorkerCandidate[];
+  /** Optional free-form tag attached to the result for downstream filtering */
+  sourceTag?: string;
+}
+
+// ─── Output ───────────────────────────────────────────────────────────────────
+
+/** Structured failure record for a single simulated request */
+export interface SimulationError {
+  /** Zero-based iteration index within the run */
+  requestIndex: number;
+  /** Synthetic request ID that was passed to decideRoute() */
+  requestId: string;
+  /** Error class name (e.g. "NoEligibleModelError", "NoActivePolicyError") */
+  errorType: string;
+  /** Error message */
+  message: string;
+}
+
+/**
+ * Aggregate result of a completed simulation run.
+ *
+ * Counts and distributions are computed over all successful routing evaluations.
+ * Failed evaluations (thrown errors) are captured in `errors` but excluded from
+ * per-model and per-worker tallies.
+ */
+export interface SimulationRunResult {
+  /** Server-assigned UUID for this run */
+  runId: string;
+  /** Scenario label from the input */
+  scenarioName: string;
+  /** UUID of the routing policy that was evaluated */
+  policyId: string;
+  /** Human-readable policy name (resolved after the run) */
+  policyName: string;
+  /** Free-form source tag from the input, if provided */
+  sourceTag?: string;
+  /** ISO 8601 timestamp when the run started */
+  startedAt: string;
+  /** ISO 8601 timestamp when the run completed */
+  completedAt: string;
+  /** Total wall-clock duration of the run in milliseconds */
+  durationMs: number;
+  /** Total number of simulated routing requests attempted */
+  totalRequests: number;
+  /** Number of requests that produced a successful routing decision */
+  successCount: number;
+  /** Number of requests that resulted in a routing error */
+  failureCount: number;
+  /** Number of successful decisions that used the fallback strategy */
+  fallbackCount: number;
+  /**
+   * Mean routing evaluation time across successful decisions in milliseconds.
+   * Zero when successCount is 0.
+   */
+  averageEvaluationMs: number;
+  /**
+   * How many times each model was selected across successful decisions.
+   * Key is the model ID string.
+   */
+  perModelSelections: Record<string, number>;
+  /**
+   * How many times each worker was assigned across successful decisions.
+   * Key is the worker ID string.
+   */
+  perWorkerAssignments: Record<string, number>;
+  /** Structured error records for each failed simulated request */
+  errors: SimulationError[];
+}
+
+// ─── HTTP validation schema ────────────────────────────────────────────────────
+
+/**
+ * Zod schema for the POST /simulation/runs request body.
+ *
+ * Model and worker override arrays are programmatic-only (not exposed via HTTP
+ * in this version) — callers that need them should use the service API directly.
+ */
+export const simulationRunHttpSchema = z.object({
+  scenarioName: z.string().min(1),
+  policyId: z.string().optional(),
+  /** Maximum 1 000 requests per HTTP call to bound response latency */
+  requestCount: z.number().int().positive().max(1_000),
+  workload: z
+    .object({
+      requestIdPrefix: z.string().min(1).optional(),
+    })
+    .optional(),
+  sourceTag: z.string().optional(),
+});
+
+export type SimulationRunHttpInput = z.infer<typeof simulationRunHttpSchema>;
