@@ -6,8 +6,9 @@
  * in-memory decision repository, carries DecisionSource.Simulation on all
  * routing calls, and publishes no stream events.
  *
- * ─── Key service ─────────────────────────────────────────────────────────────
- *   simulationEngineService — execute offline simulation runs
+ * ─── Key services ────────────────────────────────────────────────────────────
+ *   simulationEngineService   — execute offline simulation runs
+ *   workloadGeneratorService  — generate synthetic request profiles
  *
  * ─── API surface ─────────────────────────────────────────────────────────────
  *   POST /api/v1/simulation/runs — run a simulation, receive aggregate results
@@ -30,6 +31,7 @@
  */
 
 import { SimulationEngineService } from "./service/simulation-engine.service";
+import { WorkloadGeneratorService } from "./workload/workload-generator.service";
 import { buildSimulationRoute } from "./routes/simulation.route";
 import {
   policyRepo,
@@ -54,12 +56,19 @@ export const simulationEngineService = new SimulationEngineService(
   candidateEvaluatorService,
 );
 
+/**
+ * Singleton workload generator — stateless, safe to call concurrently.
+ * Use generateWorkload(config) to produce arrays of SyntheticRequestProfile.
+ */
+export const workloadGeneratorService = new WorkloadGeneratorService();
+
 /** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
 export const simulationRoute = buildSimulationRoute(simulationEngineService);
 
 // ─── Engine type re-exports ───────────────────────────────────────────────────
 
 export { SimulationEngineService } from "./service/simulation-engine.service";
+export { WorkloadGeneratorService } from "./workload/workload-generator.service";
 
 export type {
   SimulationRunInput,
@@ -70,6 +79,25 @@ export type {
 } from "./contract";
 
 export { simulationRunHttpSchema } from "./contract";
+
+// ─── Workload generator re-exports ────────────────────────────────────────────
+
+export type {
+  WorkloadConfig,
+  SyntheticRequestProfile,
+  BurstPattern,
+  WeightedDistribution,
+  WorkloadTaskType,
+  WorkloadInputSize,
+  WorkloadComplexity,
+} from "./workload/workload-generator.contract";
+
+export {
+  workloadConfigSchema,
+  TOKEN_RANGES,
+  TASK_CAPABILITIES,
+  TASK_TYPE_MAP,
+} from "./workload/workload-generator.contract";
 
 // ─── Shared contract re-exports (forward-looking async simulation API) ────────
 //

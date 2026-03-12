@@ -141,6 +141,69 @@ POST /api/v1/simulation/runs
         └── buildRunResult() → SimulationRunResult
 ```
 
+## Workload generator
+
+The `WorkloadGeneratorService` produces arrays of `SyntheticRequestProfile` that can be passed to the simulation engine via `SimulationRunInput.workloadProfiles`. Generated profiles are entirely in-memory — no live records are created.
+
+```ts
+import { workloadGeneratorService, simulationEngineService } from "../modules/simulation";
+
+const profiles = workloadGeneratorService.generateWorkload({
+  requestCount: 100,
+  taskDistribution:       { chat: 0.6, reasoning: 0.3, analysis: 0.1 },
+  inputSizeDistribution:  { small: 0.5, medium: 0.4, large: 0.1 },
+  complexityDistribution: { low: 0.4, medium: 0.4, high: 0.2 },
+  randomSeed: 42,           // omit for non-deterministic runs
+});
+
+const result = await simulationEngineService.run(ctx, {
+  scenarioName:     "chat-heavy-baseline",
+  requestCount:     profiles.length,
+  workloadProfiles: profiles,
+});
+```
+
+### Profile shape
+
+| Field | Type | Description |
+|---|---|---|
+| `requestId` | `string` | `<prefix>-<index>` |
+| `taskType` | `"chat" \| "analysis" \| "reasoning"` | Maps to `ModelTask` for routing evaluation |
+| `inputSize` | `"small" \| "medium" \| "large"` | Token volume class |
+| `estimatedComplexity` | `"low" \| "medium" \| "high"` | Combined with `inputSize` to determine token count |
+| `requiredCapabilities` | `string[]` | Derived from `taskType` (see `TASK_CAPABILITIES`) |
+| `estimatedTokenCount` | `number` | Sampled from `TOKEN_RANGES[inputSize][complexity]` |
+
+### Token count ranges
+
+| Input size | Low | Medium | High |
+|---|---|---|---|
+| small | 64–256 | 256–512 | 512–1 024 |
+| medium | 512–1 500 | 1 500–3 000 | 3 000–5 000 |
+| large | 5 000–8 000 | 8 000–16 000 | 16 000–32 000 |
+
+### Burst pattern
+
+```ts
+workloadGeneratorService.generateWorkload({
+  requestCount: 200,
+  burstPattern: {
+    burstInterval: 20,      // 20 regular requests, then…
+    burstSize: 5,           // …5 burst requests (large/high/reasoning by default)
+    burstTaskType: "reasoning",
+    burstInputSize: "large",
+    burstComplexity: "high",
+  },
+  randomSeed: 1,
+});
+```
+
+Burst slots replace regular slots — total output length always equals `requestCount`.
+
+### Determinism
+
+Pass `randomSeed` for reproducible output. Omit it for time-seeded non-deterministic runs. The PRNG is mulberry32 — compact and statistically suitable for simulation use.
+
 ## Current limitations
 
 - **No persistent storage** — simulation results are returned synchronously and not stored; there is no GET /simulation/runs/:id endpoint.

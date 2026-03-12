@@ -26,7 +26,9 @@ import { randomUUID } from "crypto";
 import type { RequestContext } from "../../../core/context";
 import { DecisionSource } from "../../../shared/contracts/routing";
 import type { PolicyId } from "../../../shared/primitives";
+import type { ModelCapability, ModelTask } from "../../../shared/contracts/model";
 import type { DecideRouteResult } from "../../routing/decision/routing-decision.contract";
+import type { ModelEvaluationProfile } from "../../routing/evaluation/evaluation.contract";
 import { RoutingDecisionService } from "../../routing/decision/routing-decision.service";
 import { InMemoryDecisionRepository } from "../../routing/repository/InMemoryDecisionRepository";
 import type { CandidateEvaluatorService } from "../../routing/evaluation/candidate-evaluator.service";
@@ -35,6 +37,8 @@ import type { ModelRegistryService } from "../../models/registry/model-registry.
 import type { WorkerRegistryService } from "../../workers/registry/worker-registry.service";
 import type { ModelCandidate } from "../../models/registry/model-registry.contract";
 import type { WorkerCandidate } from "../../workers/registry/worker-registry.contract";
+import type { SyntheticRequestProfile } from "../workload/workload-generator.contract";
+import { TASK_TYPE_MAP } from "../workload/workload-generator.contract";
 import type {
   SimulationRunInput,
   SimulationRunResult,
@@ -117,6 +121,7 @@ export class SimulationEngineService {
 
     for (let i = 0; i < input.requestCount; i++) {
       const requestId = `${prefix}-${runId.substring(0, 8)}-${i}`;
+      const profile = input.workloadProfiles?.[i];
       try {
         const result = await decisionSvc.decideRoute(ctx, {
           requestId,
@@ -124,6 +129,7 @@ export class SimulationEngineService {
           policyOverride: input.policyId,
           modelFilter: input.workload?.modelFilter,
           workerFilter: input.workload?.workerFilter,
+          modelProfile: profile ? toModelProfile(profile) : undefined,
         });
         successes.push(result);
         if (result.decision.usedFallback) fallbackCount++;
@@ -180,6 +186,21 @@ export class SimulationEngineService {
       completedMs,
     );
   }
+}
+
+// ─── Profile mapper ───────────────────────────────────────────────────────────
+//
+// Converts a SyntheticRequestProfile (workload generator vocabulary) into a
+// ModelEvaluationProfile (routing evaluation vocabulary). Only the fields that
+// influence model selection are mapped; worker evaluation profiles are left
+// unset so the engine applies its defaults.
+
+function toModelProfile(profile: SyntheticRequestProfile): ModelEvaluationProfile {
+  return {
+    taskType:             TASK_TYPE_MAP[profile.taskType] as ModelTask,
+    requiredCapabilities: profile.requiredCapabilities as ModelCapability[],
+    estimatedInputTokens: profile.estimatedTokenCount,
+  };
 }
 
 // ─── Fixed-candidate registry helpers ────────────────────────────────────────
