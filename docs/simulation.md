@@ -141,6 +141,99 @@ POST /api/v1/simulation/runs
         └── buildRunResult() → SimulationRunResult
 ```
 
+## Policy experiment runner
+
+Compare multiple routing policies under an identical synthetic workload in a single API call.
+
+### Run an experiment
+
+```http
+POST /api/v1/simulation/experiments
+Content-Type: application/json
+
+{
+  "experimentName": "cost-vs-latency-q1-2026",
+  "policies": ["policy_low_cost", "policy_balanced", "policy_low_latency"],
+  "workloadConfig": {
+    "requestCount": 500,
+    "taskDistribution": { "chat": 0.6, "analysis": 0.25, "reasoning": 0.15 },
+    "randomSeed": 42
+  }
+}
+```
+
+### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "experimentId": "a1b2c3d4-...",
+    "experimentName": "cost-vs-latency-q1-2026",
+    "workloadRequestCount": 500,
+    "policies": ["policy_low_cost", "policy_balanced", "policy_low_latency"],
+    "startedAt": "2026-01-15T12:00:00.000Z",
+    "completedAt": "2026-01-15T12:00:00.210Z",
+    "durationMs": 210,
+    "results": [
+      {
+        "policyId": "policy-uuid-a",
+        "policyName": "policy_low_cost",
+        "runId": "run-uuid-1",
+        "totalRequests": 500,
+        "successCount": 470,
+        "failureCount": 30,
+        "fallbackCount": 48,
+        "successRate": 0.94,
+        "fallbackRate": 0.102,
+        "averageEvaluationMs": 0.42,
+        "perModelSelections": { "model-economy": 380, "model-standard": 90 },
+        "perWorkerAssignments": { "worker-us-east": 260, "worker-us-west": 210 }
+      }
+    ],
+    "rankings": {
+      "bySuccessRate":     ["policy_low_latency", "policy_balanced", "policy_low_cost"],
+      "byFallbackRate":    ["policy_low_latency", "policy_balanced", "policy_low_cost"],
+      "byEvaluationSpeed": ["policy_low_latency", "policy_balanced", "policy_low_cost"]
+    }
+  }
+}
+```
+
+### Input reference
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `experimentName` | `string` | ✓ | Human-readable label |
+| `policies` | `string[]` | ✓ | Policy names or UUIDs (1–20) |
+| `workloadConfig` | `WorkloadConfig` | ✓ | Passed to the workload generator (see below) |
+| `sourceTag` | `string` | – | Free-form tag attached to every underlying simulation run |
+
+### How it works
+
+1. The workload generator produces **one set of `SyntheticRequestProfile[]`** from `workloadConfig`.
+2. The simulation engine runs **one isolated simulation per policy**, each receiving **identical profiles**.
+3. Per-policy metrics (`successRate`, `fallbackRate`, `averageEvaluationMs`) are derived from each run's `SimulationRunResult`.
+4. Rankings (`bySuccessRate`, `byFallbackRate`, `byEvaluationSpeed`) are computed across all policies.
+
+Because the workload is shared, differences in metrics reflect policy behaviour — not sampling variance.
+
+### Programmatic usage
+
+```ts
+import { experimentRunnerService } from "../modules/simulation";
+
+const result = await experimentRunnerService.run(ctx, {
+  experimentName: "synthetic-pool-comparison",
+  policies: ["policy-a", "policy-b"],
+  workloadConfig: { requestCount: 200, randomSeed: 1 },
+  modelOverrides: [/* fixed ModelCandidate[] */],
+  workerOverrides: [/* fixed WorkerCandidate[] */],
+});
+```
+
+`modelOverrides` and `workerOverrides` are programmatic-only — they bypass the live registries for all policy runs in the experiment.
+
 ## Workload generator
 
 The `WorkloadGeneratorService` produces arrays of `SyntheticRequestProfile` that can be passed to the simulation engine via `SimulationRunInput.workloadProfiles`. Generated profiles are entirely in-memory — no live records are created.

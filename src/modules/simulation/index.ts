@@ -9,9 +9,11 @@
  * ─── Key services ────────────────────────────────────────────────────────────
  *   simulationEngineService   — execute offline simulation runs
  *   workloadGeneratorService  — generate synthetic request profiles
+ *   experimentRunnerService   — compare multiple policies under one workload
  *
  * ─── API surface ─────────────────────────────────────────────────────────────
- *   POST /api/v1/simulation/runs — run a simulation, receive aggregate results
+ *   POST /api/v1/simulation/runs        — run a simulation, receive aggregate results
+ *   POST /api/v1/simulation/experiments — compare policies under shared workload
  *
  * ─── Wiring ──────────────────────────────────────────────────────────────────
  * Register routes in app/routes.ts:
@@ -30,9 +32,12 @@
  * added here is the synchronous first step toward that richer system.
  */
 
+import type { FastifyPluginAsync } from "fastify";
 import { SimulationEngineService } from "./service/simulation-engine.service";
 import { WorkloadGeneratorService } from "./workload/workload-generator.service";
+import { ExperimentRunnerService } from "./experiment/experiment-runner.service";
 import { buildSimulationRoute } from "./routes/simulation.route";
+import { buildExperimentRoute } from "./routes/experiment.route";
 import {
   policyRepo,
   candidateEvaluatorService,
@@ -62,13 +67,31 @@ export const simulationEngineService = new SimulationEngineService(
  */
 export const workloadGeneratorService = new WorkloadGeneratorService();
 
-/** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
-export const simulationRoute = buildSimulationRoute(simulationEngineService);
+/**
+ * Singleton experiment runner — orchestrates the engine and generator.
+ * Call run(ctx, input) to compare multiple policies under one shared workload.
+ */
+export const experimentRunnerService = new ExperimentRunnerService(
+  simulationEngineService,
+  workloadGeneratorService,
+);
+
+/**
+ * Combined Fastify plugin — registers both simulation routes under the prefix
+ * supplied in app/routes.ts (/api/v1):
+ *   POST /api/v1/simulation/runs
+ *   POST /api/v1/simulation/experiments
+ */
+export const simulationRoute: FastifyPluginAsync = async (fastify) => {
+  await fastify.register(buildSimulationRoute(simulationEngineService));
+  await fastify.register(buildExperimentRoute(experimentRunnerService));
+};
 
 // ─── Engine type re-exports ───────────────────────────────────────────────────
 
 export { SimulationEngineService } from "./service/simulation-engine.service";
 export { WorkloadGeneratorService } from "./workload/workload-generator.service";
+export { ExperimentRunnerService } from "./experiment/experiment-runner.service";
 
 export type {
   SimulationRunInput,
@@ -79,6 +102,18 @@ export type {
 } from "./contract";
 
 export { simulationRunHttpSchema } from "./contract";
+
+// ─── Experiment runner re-exports ─────────────────────────────────────────────
+
+export type {
+  ExperimentRunInput,
+  ExperimentRunHttpInput,
+  ExperimentResult,
+  PolicyComparisonResult,
+  ExperimentRankings,
+} from "./experiment/experiment-runner.contract";
+
+export { experimentRunHttpSchema } from "./experiment/experiment-runner.contract";
 
 // ─── Workload generator re-exports ────────────────────────────────────────────
 
