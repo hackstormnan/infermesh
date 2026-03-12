@@ -1,0 +1,76 @@
+# InferMesh CI
+#
+# Runs on every push and pull request.
+# Gates: lint → typecheck → test → build → smoke
+#
+# All steps share the same job so Node modules are installed once.
+# Env vars are set at the job level so every step (including smoke) picks them up.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Lint · Typecheck · Test · Build · Smoke
+    runs-on: ubuntu-latest
+
+    # ── Environment ───────────────────────────────────────────────────────────
+    # Provides a complete, self-contained runtime so no .env file is needed.
+    # Values mirror .env.test — kept in sync manually.
+    env:
+      NODE_ENV: test
+      PORT: 3001
+      HOST: 127.0.0.1
+      LOG_LEVEL: warn
+      LOG_PRETTY: "false"
+      SERVICE_NAME: infermesh
+      SERVICE_VERSION: "0.1.0"
+      SHUTDOWN_TIMEOUT_MS: "5000"
+      BODY_LIMIT_BYTES: "1048576"
+      AUTH_ENABLED: "false"
+      FEATURE_STREAMING: "false"
+      FEATURE_METRICS: "false"
+      FEATURE_SIMULATION: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Quality gates ──────────────────────────────────────────────────────
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # ── Artifact gates ─────────────────────────────────────────────────────
+
+      - name: Build
+        run: npm run build
+
+      # ── Smoke validation ───────────────────────────────────────────────────
+      # Boots the compiled server on an ephemeral port, calls GET /health,
+      # and asserts { data: { status: "ok" } }. Validates the production build
+      # starts cleanly and the liveness probe responds correctly.
+
+      - name: Smoke test
+        run: npm run smoke
