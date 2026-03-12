@@ -16,7 +16,8 @@
  *  7. select first eligible worker  — same determinism guarantee
  *  8. buildDecision()        — assemble the RoutingDecision entity
  *  9. decisionRepo.save()    — persist immutable record
- * 10. return DecideRouteResult — decision + full score detail for callers
+ * 10. broker.publish()       — emit RoutingDecisionPayload to "decisions" channel (best-effort)
+ * 11. return DecideRouteResult — decision + full score detail for callers
  *
  * ─── Reusability ─────────────────────────────────────────────────────────────
  *
@@ -79,6 +80,8 @@ import {
   NoEligibleWorkerError,
 } from "./routing-decision.contract";
 import type { IDecisionEvaluationStore } from "./decision-history.contract";
+import type { IStreamBroker } from "../../../stream/broker/IStreamBroker";
+import type { RoutingDecisionPayload } from "../../../stream/contract";
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -96,6 +99,13 @@ export class RoutingDecisionService {
      * Absent in tests and legacy wiring — gracefully skipped when null.
      */
     private readonly evaluationStore: IDecisionEvaluationStore | null = null,
+    /**
+     * Optional stream broker. When provided, a RoutingDecisionPayload is
+     * published to the "decisions" channel after each successful decision.
+     * Publishing is best-effort: broker errors are logged at warn level but
+     * never abort the routing flow or affect the returned result.
+     */
+    private readonly streamBroker?: IStreamBroker,
   ) {}
 
   /**
@@ -236,6 +246,28 @@ export class RoutingDecisionService {
       },
       "Routing decision recorded",
     );
+
+    // ── 5. Publish stream event (best-effort) ──────────────────────────────────
+    if (this.streamBroker) {
+      const scoreBreakdown = saved.candidates[0]?.scoreBreakdown;
+      const event: RoutingDecisionPayload = {
+        id:            saved.id,
+        timestamp:     saved.createdAt,
+        selectedModel: saved.selectedModelId as string,
+        reason:        saved.reason,
+        factors: {
+          latency:      scoreBreakdown?.latency      ?? 0,
+          cost:         scoreBreakdown?.cost         ?? 0,
+          availability: scoreBreakdown?.load         ?? 0,
+        },
+      };
+      try {
+        this.streamBroker.publish("decisions", event);
+        ctx.log.debug({ decisionId: saved.id }, "Routing decision stream event published");
+      } catch (err) {
+        ctx.log.warn({ decisionId: saved.id, err }, "Failed to publish routing decision stream event");
+      }
+    }
 
     return {
       decision: saved,

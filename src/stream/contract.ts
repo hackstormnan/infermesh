@@ -191,16 +191,31 @@ export interface RoutingOutcomeSummaryPayload {
 }
 
 /**
- * Emitted on the "decisions" channel with the full routing decision record
- * including candidate scores and selection rationale.
+ * Emitted on the "decisions" channel when a routing decision is finalized.
  *
- * Source event: RoutingDecisionService.decideRoute() → success
+ * Shape is aligned with the dashboard UI specification. The `factors` object
+ * carries normalized [0–1] dimension scores that drove the selection so the
+ * frontend can render a visual breakdown without additional API calls.
+ *
+ * Source event: RoutingDecisionService.decideRoute() → success (after the
+ * RoutingDecision record is persisted).
  */
-export interface RoutingDecisionPayload extends RoutingOutcomeSummaryPayload {
-  /** Human-readable reason the selected candidate was chosen */
+export interface RoutingDecisionPayload {
+  /** Server-assigned decision ID */
+  id: string;
+  /** ISO 8601 timestamp when the decision was finalized */
+  timestamp: string;
+  /** ID of the model that was selected (e.g. "gpt-4o", "llama-3-70b") */
+  selectedModel: string;
+  /** Human-readable explanation of why this model + worker were chosen */
   reason: string;
-  /** Number of (model, worker) pairs evaluated */
-  candidateCount: number;
-  /** Whether the decision came from live traffic or a simulation run */
-  decisionSource: string;
+  /** Normalized scoring dimensions that drove the selection [0 = worst, 1 = best] */
+  factors: {
+    /** Combined latency score for the selected model + worker pair */
+    latency: number;
+    /** Cost efficiency score for the selected model */
+    cost: number;
+    /** Worker availability score (inverse of load; 1 = fully free, 0 = saturated) */
+    availability: number;
+  };
 }

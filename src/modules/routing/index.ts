@@ -32,6 +32,10 @@
  * Register routes in app/routes.ts:
  *   import { routingRoute } from "../modules/routing";
  *   fastify.register(routingRoute, { prefix: "/api/v1" });
+ *
+ * To pass a stream broker into job routing (so routing decisions emit events):
+ *   import { buildRoutingDecisionService } from "../modules/routing";
+ *   const decisionSvc = buildRoutingDecisionService(broker);
  */
 
 import { InMemoryDecisionRepository } from "./repository/InMemoryDecisionRepository";
@@ -44,11 +48,16 @@ import { InMemoryDecisionEvaluationStore } from "./decision/InMemoryDecisionEval
 import { DecisionHistoryService } from "./decision/decision-history.service";
 import { modelRegistryService } from "../models";
 import { workerRegistryService } from "../workers";
+import type { IStreamBroker } from "../../stream/broker/IStreamBroker";
 
 // ─── Module composition ───────────────────────────────────────────────────────
 
-const policyRepo = new InMemoryPolicyRepository();
-const decisionRepo = new InMemoryDecisionRepository();
+// Shared repositories — exported so buildRoutingDecisionService() and any
+// consumer (e.g. jobs module) can share a single source of truth. The HTTP
+// GET routes read from these same repos, so all writes (live + job routing)
+// are immediately visible to the REST API.
+export const policyRepo = new InMemoryPolicyRepository();
+export const decisionRepo = new InMemoryDecisionRepository();
 
 /** Singleton service instance — shared across the process lifetime */
 export const routingService = new RoutingService(policyRepo, decisionRepo);
@@ -68,29 +77,40 @@ export const decisionEvaluationStore = new InMemoryDecisionEvaluationStore();
 export const candidateEvaluatorService = new CandidateEvaluatorService();
 
 /**
- * Routing decision engine — resolves the active policy, evaluates candidates,
- * selects the best (model, worker) pair, records an immutable RoutingDecision,
- * and persists the full evaluation for the history layer.
+ * Factory that creates a RoutingDecisionService wired to the shared module
+ * repositories and evaluation store.
  *
- * Primary entry point for live routing and simulation replay.
+ * Pass an optional stream broker to enable real-time "decisions" channel
+ * events after each successful routing decision. The broker is kept optional
+ * so callers that don't need streaming (e.g. simulation, tests) can omit it.
  *
  * Usage:
- *   const result = await routingDecisionService.decideRoute(ctx, {
- *     requestId: "req-123",
- *     jobId: "job-456",
- *     decisionSource: DecisionSource.Live,
- *   });
- *   // result.decision — persisted RoutingDecision record
- *   // result.modelScores / result.workerScores — full evaluation detail
+ *   // In app/routes.ts — with broker for live streaming:
+ *   const decisionSvc = buildRoutingDecisionService(broker);
+ *
+ *   // In tests or simulation — no streaming:
+ *   const decisionSvc = buildRoutingDecisionService();
  */
-export const routingDecisionService = new RoutingDecisionService(
-  policyRepo,
-  decisionRepo,
-  modelRegistryService,
-  workerRegistryService,
-  candidateEvaluatorService,
-  decisionEvaluationStore,
-);
+export function buildRoutingDecisionService(broker?: IStreamBroker): RoutingDecisionService {
+  return new RoutingDecisionService(
+    policyRepo,
+    decisionRepo,
+    modelRegistryService,
+    workerRegistryService,
+    candidateEvaluatorService,
+    decisionEvaluationStore,
+    broker,
+  );
+}
+
+/**
+ * No-broker singleton — used by legacy wiring and backward-compat exports.
+ * New consumers should call buildRoutingDecisionService(broker) to get a
+ * broker-aware instance that publishes "decisions" stream events.
+ *
+ * @deprecated Prefer buildRoutingDecisionService() for new wiring.
+ */
+export const routingDecisionService = buildRoutingDecisionService();
 
 /**
  * Decision history service — builds explanation-rich DecisionDetailDto responses

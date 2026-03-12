@@ -32,9 +32,10 @@
  *   POST /api/v1/jobs/:id/route  — route a queued job to the best (model, worker) pair
  *
  * ─── Wiring ──────────────────────────────────────────────────────────────────
- * Register routes in app/routes.ts:
- *   import { jobsRoute } from "../modules/jobs";
- *   fastify.register(jobsRoute, { prefix: "/api/v1" });
+ * Register routes in app/routes.ts using the factory so routing decision events
+ * are streamed over the WebSocket gateway:
+ *   import { buildJobsModule } from "../modules/jobs";
+ *   fastify.register(buildJobsModule(broker), { prefix: "/api/v1" });
  */
 
 import { InMemoryJobRepository } from "./repository/InMemoryJobRepository";
@@ -43,10 +44,13 @@ import { buildJobsRoute } from "./routes/jobs.route";
 import { JobLifecycleService } from "./lifecycle/job-lifecycle.service";
 import { JobRoutingService } from "./orchestration/job-routing.service";
 import { RoutingRecoveryService } from "./orchestration/recovery/routing-recovery.service";
-import { routingDecisionService } from "../routing";
+import { buildRoutingDecisionService } from "../routing";
+import type { IStreamBroker } from "../../stream/broker/IStreamBroker";
 
 // ─── Module composition ───────────────────────────────────────────────────────
 
+// Shared repositories — all service instances share these so CRUD and routing
+// operations see consistent state within the same process.
 const jobsRepo = new InMemoryJobRepository();
 
 /** Singleton CRUD service — createJob, getById, list */
@@ -58,36 +62,33 @@ export const jobsService = new JobsService(jobsRepo);
  */
 export const jobLifecycleService = new JobLifecycleService(jobsRepo);
 
-/**
- * Singleton recovery service — wraps RoutingDecisionService with bounded
- * fallback and retry-eligibility logic. Stateless: does not touch the job
- * lifecycle; that is the caller's responsibility (JobRoutingService).
- *
- * Strategy:
- *   1. Primary attempt: decideRoute() with the original input
- *   2. On NoEligibleWorker → fallback attempt: strips workerProfile soft hints
- *   3. Returns RecoveryOutcome with full audit trail
- */
-export const routingRecoveryService = new RoutingRecoveryService(routingDecisionService);
+// ─── Module factory ───────────────────────────────────────────────────────────
 
 /**
- * Singleton routing orchestrator — routes a Queued or Retrying job through
- * the decision + recovery engine and transitions it to Assigned (success),
- * Retrying (retry scheduled), or Failed (terminal).
+ * Build the jobs Fastify plugin with an injected stream broker.
  *
- * Usage:
- *   const result = await jobRoutingService.routeJob(ctx, { jobId: "job-123" });
- *   // result.outcome — "assigned" | "retrying"
- *   // result.job     — updated job entity
+ * Passing the broker causes routing decisions made through
+ * POST /api/v1/jobs/:id/route to publish a RoutingDecisionPayload to the
+ * "decisions" WebSocket channel on each successful route call.
+ *
+ * The broker is optional so the factory can be used in integration tests
+ * that don't need stream coverage.
+ *
+ * Usage in app/routes.ts:
+ *   import { buildJobsModule } from "../modules/jobs";
+ *   fastify.register(buildJobsModule(broker), { prefix: "/api/v1" });
  */
-export const jobRoutingService = new JobRoutingService(
-  jobsService,
-  jobLifecycleService,
-  routingRecoveryService,
-);
+export function buildJobsModule(broker?: IStreamBroker) {
+  const decisionSvc     = buildRoutingDecisionService(broker);
+  const recoverySvc     = new RoutingRecoveryService(decisionSvc);
+  const jobRoutingSvc   = new JobRoutingService(jobsService, jobLifecycleService, recoverySvc);
+  return buildJobsRoute(jobsService, jobRoutingSvc);
+}
 
-/** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
-export const jobsRoute = buildJobsRoute(jobsService, jobRoutingService);
+/** Fastify plugin — pre-built without a broker (no streaming).
+ *  Prefer buildJobsModule(broker) in app/routes.ts so routing decisions
+ *  emit "decisions" channel events over the WebSocket gateway. */
+export const jobsRoute = buildJobsModule();
 
 // ─── Public type re-exports ───────────────────────────────────────────────────
 

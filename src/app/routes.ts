@@ -16,7 +16,7 @@ import { modelsRoute } from "../modules/models";
 import { workersRoute } from "../modules/workers";
 import { routingRoute } from "../modules/routing";
 import { metricsRoute } from "../modules/metrics";
-import { jobsRoute } from "../modules/jobs";
+import { buildJobsModule } from "../modules/jobs";
 import { buildIntakeModule } from "../modules/intake";
 import { queueRoute } from "../modules/queue";
 import { statsRoute } from "../modules/stats";
@@ -66,7 +66,8 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   await fastify.register(workersRoute, { prefix: "/api/v1" });
   await fastify.register(routingRoute, { prefix: "/api/v1" });
   await fastify.register(metricsRoute, { prefix: "/api/v1" });
-  await fastify.register(jobsRoute, { prefix: "/api/v1" });
+  // Jobs — receives the broker so POST /jobs/:id/route publishes "decisions" events.
+  await fastify.register(buildJobsModule(broker), { prefix: "/api/v1" });
   await fastify.register(statsRoute, { prefix: "/api/v1" });
 
   // ── Stream gateway — WebSocket + internal emit ──────────────────────────────
