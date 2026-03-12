@@ -41,6 +41,7 @@ import type {
   JobId,
   ModelId,
   PaginatedResponse,
+  RequestId,
   WorkerId,
 } from "../../../shared/primitives";
 import { toIsoTimestamp } from "../../../shared/primitives";
@@ -103,7 +104,7 @@ export class JobsService {
     const now = toIsoTimestamp();
     const job: Job = {
       id: randomUUID() as JobId,
-      requestId: dto.requestId as any,
+      requestId: dto.requestId as RequestId,
       sourceType: dto.sourceType ?? JobSourceType.Live,
       status: JobStatus.Queued,
       priority: dto.priority ?? JobPriority.Normal,

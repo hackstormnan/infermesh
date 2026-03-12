@@ -31,7 +31,7 @@ import { listWorkersQuerySchema, workerCandidatesQuerySchema } from "../queries"
 import type { WorkersService } from "../service/workers.service";
 import type { WorkerRegistryService } from "../registry/worker-registry.service";
 import type { WorkerCandidate } from "../registry/worker-registry.contract";
-import { WorkerStatus } from "../../../shared/contracts/worker";
+import type { WorkerStatus } from "../../../shared/contracts/worker";
 
 /**
  * Factory that creates a Fastify plugin for workers routes.
