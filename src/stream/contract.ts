@@ -151,19 +151,54 @@ export interface RequestAcceptedPayload {
 }
 
 /**
- * Emitted on the "workers" channel when a worker's operational status changes.
+ * UI-facing status vocabulary for the "workers" stream channel.
+ *
+ * Simplified from the internal WorkerStatus enum so dashboard clients
+ * receive a stable, display-ready string without needing to know the
+ * backend's full lifecycle state machine.
+ *
+ *   healthy  — worker is online and accepting jobs (Idle or Busy)
+ *   degraded — worker is online but impaired (Draining or Unhealthy)
+ *   offline  — worker is deregistered or unreachable
+ */
+export type WorkerStreamStatus = "healthy" | "degraded" | "offline";
+
+/**
+ * Emitted on the "workers" channel when a worker's operational status
+ * or runtime metrics change.
  *
  * Source events: WorkersService.register(), heartbeat(), deregister()
+ *
+ * Shape is aligned with the dashboard UI specification. Optional metric
+ * fields are absent when the worker has not yet reported them (e.g. on
+ * first registration before the first heartbeat).
+ *
+ * Publishing is best-effort — broker errors are logged at warn level and
+ * never abort the underlying write operation.
  */
 export interface WorkerStatusPayload {
+  /** Server-assigned worker ID */
   workerId: string;
+  /** Dashboard-facing status (simplified from internal WorkerStatus enum) */
+  status: WorkerStreamStatus;
+  /** CPU utilisation percentage (0–100); absent if not yet reported */
+  cpu?: number;
+  /** Memory utilisation percentage (0–100); absent if not yet reported */
+  memory?: number;
+  /** Time-to-first-token in milliseconds (rolling average); absent if not yet reported */
+  latency?: number;
+  /** Number of jobs queued locally on the worker */
+  queueSize: number;
+  /** Observed output throughput in tokens per second; absent if not yet reported */
+  throughput?: number;
+  /** Worker display name */
   name: string;
-  /** WorkerStatus string value */
-  status: string;
+  /** Geographic or logical region */
   region?: string;
-  /** Current number of active jobs on this worker */
-  activeJobs?: number;
-  updatedAt: string;
+  /** Unix epoch ms of the last heartbeat */
+  lastHeartbeat: number;
+  /** Composite load score [0=idle, 1=saturated]; absent if not yet reported */
+  loadScore?: number;
   /** The operation that triggered this event */
   event: "registered" | "heartbeat" | "deregistered";
 }

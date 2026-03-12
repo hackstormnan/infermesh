@@ -44,12 +44,16 @@ import { InMemoryWorkerRepository } from "./repository/InMemoryWorkerRepository"
 import { WorkersService } from "./service/workers.service";
 import { WorkerRegistryService } from "./registry/worker-registry.service";
 import { buildWorkersRoute } from "./routes/workers.route";
+import type { IStreamBroker } from "../../stream/broker/IStreamBroker";
 
 // ─── Module composition ───────────────────────────────────────────────────────
 
+// Shared repository — all service instances share this so CRUD and registry
+// operations see consistent state within the same process.
 const repo = new InMemoryWorkerRepository();
 
-/** Singleton CRUD service — shared across the process lifetime */
+/** Singleton CRUD service (no broker) — shared across the process lifetime.
+ *  For live streaming use buildWorkersModule(broker) in app/routes.ts. */
 export const workersService = new WorkersService(repo);
 
 /**
@@ -61,8 +65,33 @@ export const workersService = new WorkersService(repo);
  */
 export const workerRegistryService = new WorkerRegistryService(repo);
 
-/** Fastify plugin — register under /api/v1 prefix in app/routes.ts */
-export const workersRoute = buildWorkersRoute(workersService, workerRegistryService);
+// ─── Module factory ───────────────────────────────────────────────────────────
+
+/**
+ * Build the workers Fastify plugin with an injected stream broker.
+ *
+ * Passing the broker causes worker state changes (register, heartbeat,
+ * deregister) to publish a WorkerStatusPayload to the "workers" WebSocket
+ * channel after each successful write.
+ *
+ * The broker is optional so the factory can be used in tests and environments
+ * that don't need streaming. The shared repo ensures the broker-injected
+ * WorkersService instance and the exported workersService singleton stay
+ * consistent — both see the same underlying worker pool.
+ *
+ * Usage in app/routes.ts:
+ *   import { buildWorkersModule } from "../modules/workers";
+ *   fastify.register(buildWorkersModule(broker), { prefix: "/api/v1" });
+ */
+export function buildWorkersModule(broker?: IStreamBroker) {
+  const svc = new WorkersService(repo, broker);
+  return buildWorkersRoute(svc, workerRegistryService);
+}
+
+/** Fastify plugin — pre-built without a broker (no streaming).
+ *  Prefer buildWorkersModule(broker) in app/routes.ts so worker events
+ *  emit over the WebSocket gateway. */
+export const workersRoute = buildWorkersModule();
 
 // ─── Public type re-exports ───────────────────────────────────────────────────
 

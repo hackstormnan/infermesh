@@ -40,9 +40,21 @@ import type { ModelId, PaginatedResponse, WorkerId } from "../../../shared/primi
 import { toIsoTimestamp } from "../../../shared/primitives";
 import type { IWorkerRepository } from "../repository/IWorkerRepository";
 import type { ListWorkersQuery } from "../queries";
+import type { IStreamBroker } from "../../../stream/broker/IStreamBroker";
+import type { WorkerStatusPayload, WorkerStreamStatus } from "../../../stream/contract";
 
 export class WorkersService {
-  constructor(private readonly repo: IWorkerRepository) {}
+  constructor(
+    private readonly repo: IWorkerRepository,
+    /**
+     * Optional stream broker. When provided, a WorkerStatusPayload is
+     * published to the "workers" channel after each successful write
+     * (register, heartbeat, deregister). Publishing is best-effort:
+     * broker errors are logged at warn level but never abort the operation
+     * or affect the returned DTO.
+     */
+    private readonly streamBroker?: IStreamBroker,
+  ) {}
 
   // ─── Write operations (wired to routes in a later ticket) ─────────────────
 
@@ -91,6 +103,7 @@ export class WorkersService {
     );
 
     const saved = await this.repo.create(worker);
+    this.publishEvent(ctx, saved, "registered");
     return toDto(saved);
   }
 
@@ -125,6 +138,7 @@ export class WorkersService {
       throw new NotFoundError(`Worker ${id}`);
     }
 
+    this.publishEvent(ctx, updated, "heartbeat");
     return toDto(updated);
   }
 
@@ -144,6 +158,7 @@ export class WorkersService {
       throw new NotFoundError(`Worker ${id}`);
     }
 
+    this.publishEvent(ctx, updated, "deregistered");
     return toDto(updated);
   }
 
@@ -179,6 +194,60 @@ export class WorkersService {
 
     const result = await this.repo.list(query);
     return { ...result, items: result.items.map(toDto) };
+  }
+
+  // ─── Stream publishing ─────────────────────────────────────────────────────
+
+  private publishEvent(
+    ctx: RequestContext,
+    worker: Worker,
+    event: WorkerStatusPayload["event"],
+  ): void {
+    if (!this.streamBroker) return;
+    const payload: WorkerStatusPayload = {
+      workerId: worker.id,
+      status: toStreamStatus(worker.status),
+      cpu: worker.runtimeMetrics.cpuUsagePercent,
+      memory: worker.runtimeMetrics.memoryUsagePercent,
+      latency: worker.runtimeMetrics.ttftMs,
+      queueSize: worker.capacity.queuedJobs,
+      throughput: worker.runtimeMetrics.tokensPerSecond,
+      name: worker.name,
+      region: worker.region,
+      lastHeartbeat: worker.lastHeartbeatAt,
+      loadScore: worker.runtimeMetrics.loadScore,
+      event,
+    };
+    try {
+      this.streamBroker.publish("workers", payload);
+      ctx.log.debug({ workerId: worker.id, event }, "Worker stream event published");
+    } catch (err) {
+      ctx.log.warn({ workerId: worker.id, event, err }, "Failed to publish worker stream event");
+    }
+  }
+}
+
+// ─── Status mapper ────────────────────────────────────────────────────────────
+
+/**
+ * Maps the internal WorkerStatus enum to the simplified WorkerStreamStatus
+ * vocabulary used in the "workers" channel payload.
+ *
+ *   Idle | Busy      → "healthy"   (online and accepting or executing jobs)
+ *   Draining | Unhealthy → "degraded" (online but impaired)
+ *   Offline          → "offline"
+ */
+function toStreamStatus(status: WorkerStatus): WorkerStreamStatus {
+  switch (status) {
+    case WorkerStatus.Idle:
+    case WorkerStatus.Busy:
+      return "healthy";
+    case WorkerStatus.Draining:
+    case WorkerStatus.Unhealthy:
+      return "degraded";
+    case WorkerStatus.Offline:
+    default:
+      return "offline";
   }
 }
 

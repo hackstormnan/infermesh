@@ -13,7 +13,7 @@ import type { FastifyInstance } from "fastify";
 import { healthRoute } from "../infra/health/health.route";
 import { requestsRoute } from "../modules/requests";
 import { modelsRoute } from "../modules/models";
-import { workersRoute } from "../modules/workers";
+import { buildWorkersModule } from "../modules/workers";
 import { routingRoute } from "../modules/routing";
 import { metricsRoute } from "../modules/metrics";
 import { buildJobsModule } from "../modules/jobs";
@@ -63,7 +63,8 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // Domain read/management routes — versioned under /api/v1
   await fastify.register(requestsRoute, { prefix: "/api/v1" });
   await fastify.register(modelsRoute, { prefix: "/api/v1" });
-  await fastify.register(workersRoute, { prefix: "/api/v1" });
+  // Workers — receives the broker so register/heartbeat/deregister publish "workers" events.
+  await fastify.register(buildWorkersModule(broker), { prefix: "/api/v1" });
   await fastify.register(routingRoute, { prefix: "/api/v1" });
   await fastify.register(metricsRoute, { prefix: "/api/v1" });
   // Jobs — receives the broker so POST /jobs/:id/route publishes "decisions" events.
