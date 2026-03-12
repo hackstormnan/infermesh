@@ -44,8 +44,11 @@ export async function buildServer() {
   });
 
   // ── Global plugins ────────────────────────────────────────────────────────
-  // RequestContext decorator — must be registered before routes
-  await fastify.register(contextPlugin);
+  // RequestContext decorator — called directly (not via register) so the
+  // onRequest hook is added to the ROOT scope and fires for every route.
+  // fastify.register() creates an encapsulated child scope in Fastify v5;
+  // hooks inside it only apply to routes in that scope's subtree.
+  await contextPlugin(fastify);
 
   // WebSocket support — must be registered before any WebSocket route plugins
   await fastify.register(fastifyWebsocket);
