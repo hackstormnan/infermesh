@@ -107,19 +107,47 @@ export interface ErrorPayload {
 // ─── Domain channel payload types ────────────────────────────────────────────
 
 /**
+ * UI-facing status vocabulary for the "requests" stream channel.
+ *
+ * This is deliberately decoupled from the internal RequestStatus enum so
+ * the dashboard receives a stable, simplified status string that the frontend
+ * can display without knowing the backend's lifecycle state machine.
+ *
+ * Lifecycle progression:
+ *   pending    → request accepted, waiting for routing/execution
+ *   processing → worker has been assigned; execution in flight
+ *   completed  → terminal success
+ *   failed     → terminal failure
+ */
+export type RequestStreamStatus = "pending" | "processing" | "completed" | "failed";
+
+/**
  * Emitted on the "requests" channel when a new inference request is accepted
  * by the intake flow and successfully enqueued.
  *
- * Source event: IntakeService.intake() → success
+ * Source event: IntakeService.intake() → success (after both request and
+ * job records are created and the job has been dispatched to the queue).
+ *
+ * Shape is aligned with the dashboard UI specification so the frontend can
+ * consume it directly without field remapping.
  */
 export interface RequestAcceptedPayload {
-  requestId: string;
-  jobId: string;
-  queueMessageId: string;
-  /** RequestStatus string value at acceptance time */
-  status: string;
-  createdAt: string;
-  enqueuedAt: string;
+  /** Server-assigned request ID */
+  id: string;
+  /** ISO 8601 timestamp when the request was accepted */
+  timestamp: string;
+  /** Model identifier the request targets (e.g. "gpt-4o", "llama-3-70b") */
+  model: string;
+  /**
+   * Measured end-to-end latency in milliseconds.
+   * Always 0 at acceptance time; updated by subsequent stream events
+   * once the worker completes execution.
+   */
+  latency: number;
+  /** Dashboard-facing request status at the time of this event */
+  status: RequestStreamStatus;
+  /** Canonical intake API endpoint path */
+  endpoint: string;
 }
 
 /**

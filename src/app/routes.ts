@@ -17,7 +17,7 @@ import { workersRoute } from "../modules/workers";
 import { routingRoute } from "../modules/routing";
 import { metricsRoute } from "../modules/metrics";
 import { jobsRoute } from "../modules/jobs";
-import { intakeRoute } from "../modules/intake";
+import { buildIntakeModule } from "../modules/intake";
 import { queueRoute } from "../modules/queue";
 import { statsRoute } from "../modules/stats";
 import {
@@ -44,11 +44,18 @@ export function createStreamServices() {
 }
 
 export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
+  // ── Stream services — created first so the broker can be threaded into
+  //    any module that needs to publish events (intake, workers, routing, …).
+  //    The registry and broker are singletons scoped to this server instance,
+  //    so each buildServer() call (e.g. in tests) gets fully isolated state.
+  const { registry, broker } = createStreamServices();
+
   // Infrastructure routes (no versioned prefix — used by load balancers / k8s probes)
   await fastify.register(healthRoute);
 
-  // Intake — primary entry point for inference requests
-  await fastify.register(intakeRoute, { prefix: "/api/v1" });
+  // Intake — primary entry point for inference requests.
+  // Receives the broker so it can publish "requests" stream events on acceptance.
+  await fastify.register(buildIntakeModule(broker), { prefix: "/api/v1" });
 
   // Queue — internal/debug inspection endpoint
   await fastify.register(queueRoute, { prefix: "/api/v1" });
@@ -67,10 +74,6 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // Upgrade path: ws://host/api/v1/stream
   // Internal endpoints: POST /api/v1/internal/stream/emit
   //                     GET  /api/v1/internal/stream/status
-  //
-  // The gateway holds its own registry and broker instances so future tickets
-  // can inject the broker into domain services for publish-on-event wiring.
-  const { registry, broker } = createStreamServices();
   await fastify.register(streamGateway, {
     prefix: "/api/v1",
     registry,
