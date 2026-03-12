@@ -4,8 +4,11 @@
  * Centralized, Zod-validated configuration organized by concern.
  *
  * ─── Design ──────────────────────────────────────────────────────────────────
- * All env vars are parsed once at module load. If validation fails the process
- * writes a structured diagnostic to stderr and exits — no partially-booted server.
+ * All env vars are parsed once at module load. If validation fails an Error is
+ * thrown — the caller (main.ts or the test runner) decides how to handle it.
+ * In production the unhandled throw crashes the process immediately with a
+ * non-zero exit code and a clear message. In tests Vitest surfaces it as a
+ * module-load failure with the full error message.
  *
  * Config is projected into typed sub-sections so call sites read
  * `config.server.port` rather than `config.PORT`. The section name makes
@@ -22,6 +25,31 @@
 
 import "dotenv/config";
 import { z } from "zod";
+
+// ─── Boolean env helper ───────────────────────────────────────────────────────
+//
+// z.coerce.boolean() uses JavaScript's Boolean() function, which converts any
+// non-empty string — including "false" and "0" — to true. That is wrong for
+// environment variables where "false" means false.
+//
+// This preprocessor maps the conventional env-var string representations:
+//   "true" | "1"  → true
+//   anything else → false  (including "false", "0", "", undefined)
+
+function boolEnv(defaultVal = false) {
+  return z.preprocess((v) => {
+    if (v === undefined || v === null || v === "") return defaultVal;
+    if (typeof v === "string") return v === "true" || v === "1";
+    return Boolean(v);
+  }, z.boolean());
+}
+
+// Optional variant: returns undefined when the variable is absent.
+const optionalBoolEnv = z.preprocess((v) => {
+  if (v === undefined || v === null || v === "") return undefined;
+  if (typeof v === "string") return v === "true" || v === "1";
+  return Boolean(v);
+}, z.boolean().optional());
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -51,16 +79,16 @@ const envSchema = z.object({
    * Override pino-pretty formatting. Defaults to true in development.
    * Explicitly set LOG_PRETTY=false to see raw JSON locally.
    */
-  LOG_PRETTY: z.coerce.boolean().optional(),
+  LOG_PRETTY: optionalBoolEnv,
 
   // Auth (placeholder — implementation in a future ticket)
-  AUTH_ENABLED: z.coerce.boolean().default(false),
+  AUTH_ENABLED: boolEnv(false),
   JWT_SECRET: z.string().optional(),
 
   // Feature flags
-  FEATURE_STREAMING: z.coerce.boolean().default(false),
-  FEATURE_METRICS: z.coerce.boolean().default(false),
-  FEATURE_SIMULATION: z.coerce.boolean().default(false),
+  FEATURE_STREAMING: boolEnv(false),
+  FEATURE_METRICS: boolEnv(false),
+  FEATURE_SIMULATION: boolEnv(false),
 });
 
 type RawEnv = z.infer<typeof envSchema>;
@@ -70,12 +98,11 @@ type RawEnv = z.infer<typeof envSchema>;
 const result = envSchema.safeParse(process.env);
 
 if (!result.success) {
-  process.stderr.write(
+  throw new Error(
     `\n[infermesh] ✗ Invalid environment — cannot start.\n\n` +
       JSON.stringify(result.error.flatten().fieldErrors, null, 2) +
-      `\n\nSee .env.example for all required variables.\n\n`,
+      `\n\nSee .env.example for all required variables.\n`,
   );
-  process.exit(1);
 }
 
 const raw: RawEnv = result.data;
@@ -84,16 +111,14 @@ const raw: RawEnv = result.data;
 
 if (raw.AUTH_ENABLED) {
   if (!raw.JWT_SECRET) {
-    process.stderr.write(
-      `\n[infermesh] ✗ AUTH_ENABLED=true requires JWT_SECRET to be set.\n\n`,
+    throw new Error(
+      `\n[infermesh] ✗ AUTH_ENABLED=true requires JWT_SECRET to be set.\n`,
     );
-    process.exit(1);
   }
   if (raw.NODE_ENV === "production" && raw.JWT_SECRET.length < 32) {
-    process.stderr.write(
-      `\n[infermesh] ✗ JWT_SECRET must be at least 32 characters in production.\n\n`,
+    throw new Error(
+      `\n[infermesh] ✗ JWT_SECRET must be at least 32 characters in production.\n`,
     );
-    process.exit(1);
   }
 }
 
