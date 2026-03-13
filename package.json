@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
+    "seed": "tsx scripts/seed.ts",
     "smoke": "tsx scripts/smoke.ts"
   },
   "keywords": [
