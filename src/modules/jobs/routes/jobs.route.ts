@@ -52,7 +52,7 @@ export function buildJobsRoute(
               type: "object",
               properties: {
                 success: { type: "boolean" },
-                data: { type: "object" },
+                data: { type: "object", additionalProperties: true },
                 meta: {
                   type: "object",
                   properties: {
@@ -97,7 +97,7 @@ export function buildJobsRoute(
               type: "object",
               properties: {
                 success: { type: "boolean" },
-                data: { type: "object" },
+                data: { type: "object", additionalProperties: true },
                 meta: {
                   type: "object",
                   properties: {
@@ -149,7 +149,7 @@ export function buildJobsRoute(
                 type: "object",
                 properties: {
                   success: { type: "boolean" },
-                  data: { type: "object" },
+                  data: { type: "object", additionalProperties: true },
                   meta: {
                     type: "object",
                     properties: {

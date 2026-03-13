@@ -42,7 +42,7 @@ export function buildSimulationRoute(
             properties: {
               scenarioName:  { type: "string" },
               policyId:      { type: "string" },
-              requestCount:  { type: "number" },
+              requestCount:  { type: "number", minimum: 1, maximum: 1000 },
               workload: {
                 type: "object",
                 properties: {
@@ -57,7 +57,7 @@ export function buildSimulationRoute(
               type: "object",
               properties: {
                 success:   { type: "boolean" },
-                data:      { type: "object" },
+                data:      { type: "object", additionalProperties: true },
                 meta: {
                   type: "object",
                   properties: {
