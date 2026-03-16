@@ -251,3 +251,135 @@ Standard error codes: `NOT_FOUND` (404), `VALIDATION_ERROR` (400), `NO_ACTIVE_PO
 ## Request correlation
 
 Every request carries a `requestId` (UUID v4) sourced from the inbound `x-request-id` header or generated server-side. The ID is attached to every Pino log line for that request via `RequestContext`, echoed as a response header, and stored on `InferenceRequest`, `Job`, and `RoutingDecision` entities for end-to-end tracing.
+
+---
+
+## Frontend dashboard
+
+A React + TypeScript admin console lives at [`frontend/`](../frontend/). It connects to this backend over REST and WebSocket and provides live stream panels, a filterable request log, worker health cards, analytics charts, and an interactive offline simulation console.
+
+See [frontend/README.md](../frontend/README.md) for setup, architecture, and the recommended demo walkthrough.
+
+---
+
+## Architecture diagrams
+
+Mermaid renderings of the key flows. These supplement the text descriptions above.
+
+### Module dependency graph
+
+```mermaid
+graph TD
+    intake["intake\nPOST /intake/requests"]
+    requests["requests\nGET /requests"]
+    models["models\nGET+POST /models"]
+    workers["workers\nGET+POST /workers"]
+    queue["queue\nInMemoryJobQueue"]
+    jobs["jobs\nrouting orchestration"]
+    routing["routing\npolicy + decisions"]
+    metrics["metrics\nanalytics aggregation"]
+    stats["stats\ncross-module summary"]
+    simulation["simulation\noffline evaluation"]
+    stream["stream\nWebSocket gateway"]
+
+    intake --> requests
+    intake --> queue
+    intake --> stream
+    jobs --> routing
+    jobs --> queue
+    routing --> models
+    routing --> workers
+    routing --> stream
+    workers --> stream
+    stats --> requests
+    stats --> models
+    stats --> workers
+    stats --> metrics
+    simulation --> routing
+    simulation --> models
+    simulation --> workers
+```
+
+### Request intake flow
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant I as IntakeService
+    participant Rq as RequestRepo
+    participant Q as JobQueue
+    participant B as StreamBroker
+
+    C->>I: POST /api/v1/intake/requests
+    I->>Rq: save(InferenceRequest)
+    I->>Q: enqueue(Job)
+    I->>B: publish("requests", RequestAcceptedPayload)
+    I-->>C: 202 { requestId, jobId }
+```
+
+### Routing decision flow
+
+```mermaid
+sequenceDiagram
+    participant J as JobRoutingService
+    participant D as RoutingDecisionService
+    participant E as CandidateEvaluator
+    participant M as ModelRegistry
+    participant W as WorkerRegistry
+    participant B as StreamBroker
+
+    J->>D: decideRoute(ctx, input)
+    D->>D: resolvePolicy()
+    D->>M: findEligible(modelFilter)
+    D->>E: evaluateModels(candidates)
+    Note over E: quality · cost · latency scoring<br/>hard-constraint disqualification
+    D->>W: findEligible(workerFilter)
+    D->>E: evaluateWorkers(candidates)
+    Note over E: load · latency · capability scoring
+    D->>D: buildDecision() + persistDecision()
+    D->>B: publish("decisions", RoutingDecisionPayload)
+    D-->>J: DecideRouteResult { decision, scores, evaluationMs }
+```
+
+### Policy experiment flow
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant X as ExperimentRunnerService
+    participant G as WorkloadGenerator
+    participant S as SimulationEngine
+
+    C->>X: POST /api/v1/simulation/experiments
+    X->>G: generateWorkload(workloadConfig)
+    G-->>X: SyntheticRequestProfile[] (shared across all policies)
+    loop for each policy
+        X->>S: run({ policyId, workloadProfiles })
+        Note over S: scoped InMemoryDecisionRepository<br/>no broker · no live records
+        S-->>X: SimulationRunResult
+    end
+    X->>X: buildRankings(bySuccessRate, byFallbackRate, byEvaluationSpeed)
+    X-->>C: ExperimentResult { rankings, results[] }
+```
+
+### WebSocket stream flow
+
+```mermaid
+sequenceDiagram
+    participant C as WS Client
+    participant G as StreamGateway
+    participant R as ConnectionRegistry
+    participant B as StreamBroker
+
+    C->>G: WebSocket connect
+    G->>R: register(connectionId, socket)
+    G-->>C: system { connectionId, availableChannels }
+    C->>G: { action: "subscribe", channels: ["requests","decisions"] }
+    G->>R: subscribe(connectionId, channels)
+    G-->>C: ack { action, channels }
+    Note over B,R: Domain service publishes an event
+    B->>R: publish("decisions", payload)
+    R->>C: StreamEnvelope { type, data, timestamp }
+    C->>G: WebSocket close
+    G->>R: deregister(connectionId)
+```

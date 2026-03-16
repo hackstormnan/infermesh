@@ -266,14 +266,17 @@ All responses use a consistent JSON envelope:
 
 | Document | Contents |
 |---|---|
+| [docs/demo.md](docs/demo.md) | Step-by-step backend API demo walkthrough with copy-paste commands |
+| [docs/screenshots.md](docs/screenshots.md) | Frontend dashboard screenshot gallery |
 | [docs/api-examples.md](docs/api-examples.md) | Copy-paste curl examples for every route + WebSocket subscription |
-| [docs/architecture.md](docs/architecture.md) | Module map, request flow, routing flow, simulation flow, WebSocket flow |
+| [docs/architecture.md](docs/architecture.md) | Module map, Mermaid flow diagrams, dependency rules, frontend overview |
 | [docs/configuration.md](docs/configuration.md) | All environment variables with types, defaults, and cross-field rules |
 | [docs/simulation.md](docs/simulation.md) | Simulation engine, workload generator, policy experiment runner |
 | [docs/deployment.md](docs/deployment.md) | Topology, reverse proxy, WebSocket config, in-memory limitations |
 | [docs/testing.md](docs/testing.md) | Test strategy, integration test patterns, isolation approach |
 | [docs/ci.md](docs/ci.md) | GitHub Actions pipeline, available commands, smoke test |
 | [docs/runbooks.md](docs/runbooks.md) | Troubleshooting for startup, routing, streaming, and CI issues |
+| [frontend/README.md](frontend/README.md) | Frontend setup, page guide, architecture, and demo walkthrough |
 
 ---
 
