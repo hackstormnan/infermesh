@@ -46,7 +46,7 @@ function NavItemLink({ path, label, icon: Icon }: NavItem) {
         color: isActive ? 'var(--color-text-primary)' : '#575C72',
         backgroundColor: isActive ? 'rgba(59,130,246,0.08)' : 'transparent',
         fontFamily: 'var(--font-body)',
-        fontSize: 13,
+        fontSize: 14,
         fontWeight: isActive ? 600 : 400,
         textDecoration: 'none',
         transition: 'background-color 0.1s, color 0.1s',
