@@ -86,6 +86,20 @@ See [docs/architecture.md](docs/architecture.md) for the full module map, data f
 
 ---
 
+## Frontend dashboard
+
+InferMesh ships with a React + TypeScript admin console at [`frontend/`](frontend/).
+
+The dashboard connects to this backend over REST and WebSocket and provides:
+- Live request, routing-decision, and worker-heartbeat streams
+- Filterable request log, worker health cards, and model registry grid
+- Analytics charts (throughput, latency percentiles, cost breakdown)
+- Interactive offline simulation — single-run and multi-policy experiment comparison
+
+See [frontend/README.md](frontend/README.md) for setup instructions, the recommended demo walkthrough, and the frontend architecture overview.
+
+---
+
 ## Quick start
 
 **Prerequisites:** Node.js 22+, npm

@@ -180,8 +180,6 @@ export function SimRunForm({ form, setForm, submitting, error, onSubmit }: Props
         </button>
 
       </div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </Panel>
   )
 }

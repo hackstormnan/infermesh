@@ -380,8 +380,6 @@ export function ExperimentForm({ form, setForm, submitting, error, onSubmit }: P
         </button>
 
       </div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </Panel>
   )
 }
