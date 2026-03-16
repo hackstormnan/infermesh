@@ -14,7 +14,7 @@ import { apiClient, ApiClientError } from '../api/client'
 import { mapRequests, type RequestViewModel } from '../api/mappers/request.mapper'
 import type { InferenceRequestDto, RequestStatus } from '../api/types/requests'
 import type { PaginatedData } from '../api/types/common'
-import type { InferMeshStreamEvent, RequestStreamEvent } from '../api/types/stream'
+import type { InferMeshStreamEvent } from '../api/types/stream'
 import { useStreamSocket, type ConnectionState } from './useStreamSocket'
 
 const MAX_ITEMS = 50
@@ -34,33 +34,26 @@ export function useRequestStream(): UseRequestStreamResult {
   // ── WebSocket event handler ──────────────────────────────────────────────────
 
   const handleEvent = useCallback((event: InferMeshStreamEvent) => {
-    if (event.channel !== 'requests') return
-    const e = event as RequestStreamEvent
+    if (event.type !== 'requests') return
+    const payload = event.data
 
-    if (e.type === 'request.created') {
-      const newItem: RequestViewModel = {
-        id: e.requestId,
-        shortId: e.requestId.slice(0, 8),
-        modelId: e.modelId,
-        status: e.status as RequestStatus,
-        taskType: 'chat',
-        age: 'just now',
-        createdAt: new Date(e.timestamp),
-        hasRouted: false,
-      }
-      setRequests(prev => [newItem, ...prev].slice(0, MAX_ITEMS))
-      return
-    }
+    // Map stream status to internal RequestStatus for display
+    const reqStatus: RequestStatus =
+      payload.status === 'pending'    ? 'queued'     :
+      payload.status === 'processing' ? 'dispatched' :
+      payload.status as RequestStatus  // 'completed' | 'failed' match directly
 
-    if (e.type === 'request.updated') {
-      setRequests(prev =>
-        prev.map(r =>
-          r.id === e.requestId
-            ? { ...r, status: e.status as RequestStatus }
-            : r,
-        ),
-      )
+    const newItem: RequestViewModel = {
+      id: payload.id,
+      shortId: payload.id.slice(0, 8),
+      modelId: payload.model,
+      status: reqStatus,
+      taskType: 'chat',
+      age: 'just now',
+      createdAt: new Date(payload.timestamp),
+      hasRouted: false,
     }
+    setRequests(prev => [newItem, ...prev].slice(0, MAX_ITEMS))
   }, [])
 
   const connectionState = useStreamSocket(['requests'], handleEvent)

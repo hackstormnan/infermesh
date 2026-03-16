@@ -129,7 +129,7 @@ export function Requests() {
       <Panel style={{ display: 'flex', flexDirection: 'column' }}>
         <PanelHeader
           title="Request Log"
-          subtitle={loading ? undefined : `${total.toLocaleString()} total`}
+          subtitle={loading || error ? undefined : `${total.toLocaleString()} total`}
           right={<ConnectionStatusBadge state={connectionState} />}
         />
 
@@ -138,6 +138,7 @@ export function Requests() {
           statusFilter={statusFilter}
           total={total}
           loading={loading}
+          error={error}
           onSearchChange={setSearch}
           onStatusChange={setStatusFilter}
           onExport={handleExport}

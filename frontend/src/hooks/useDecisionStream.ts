@@ -16,7 +16,7 @@ import {
 } from '../api/mappers/routing.mapper'
 import type { RoutingDecisionDto, RoutingOutcome } from '../api/types/routing'
 import type { PaginatedData } from '../api/types/common'
-import type { InferMeshStreamEvent, RoutingStreamEvent } from '../api/types/stream'
+import type { InferMeshStreamEvent } from '../api/types/stream'
 import { useStreamSocket, type ConnectionState } from './useStreamSocket'
 
 const MAX_ITEMS = 30
@@ -36,35 +36,36 @@ export function useDecisionStream(): UseDecisionStreamResult {
   // ── WebSocket event handler ──────────────────────────────────────────────────
 
   const handleEvent = useCallback((event: InferMeshStreamEvent) => {
-    if (event.channel !== 'routing' && event.channel !== 'decisions') return
-    if (event.type !== 'routing.decision_made') return
-    const e = event as RoutingStreamEvent
+    // 'routing' channel carries RoutingOutcomeSummaryPayload which has all
+    // the fields needed for the decision list view (requestId, outcome, etc.)
+    if (event.type !== 'routing') return
+    const payload = event.data  // RoutingOutcomeSummaryPayload
 
-    const outcome = e.outcome as RoutingOutcome
+    const outcome = payload.outcome as RoutingOutcome
     const newItem: RoutingDecisionViewModel = {
-      id: e.decisionId,
-      shortId: e.decisionId.slice(0, 8),
-      requestId: e.requestId,
-      policyId: e.policyId,
+      id: payload.decisionId,
+      shortId: payload.decisionId.slice(0, 8),
+      requestId: payload.requestId,
+      policyId: '',  // not included in the stream summary payload
       outcome,
-      health: outcome === 'routed' ? 'success' : 'failed',
-      selectedModelId: e.selectedModelId,
-      selectedWorkerId: e.selectedWorkerId,
-      evaluationMs: e.evaluationMs,
-      evalDisplay: `${e.evaluationMs}ms`,
-      usedFallback: false,
+      health: payload.usedFallback ? 'fallback' : outcome === 'routed' ? 'success' : 'failed',
+      selectedModelId: payload.selectedModelId,
+      selectedWorkerId: payload.selectedWorkerId,
+      evaluationMs: payload.evaluationMs,
+      evalDisplay: `${payload.evaluationMs}ms`,
+      usedFallback: payload.usedFallback,
       candidateCount: 0,
       excludedCount: 0,
       reason: '',
       decisionSource: 'live',
       age: 'just now',
-      decidedAt: new Date(e.timestamp),
+      decidedAt: new Date(payload.decidedAt),
     }
 
     setDecisions(prev => [newItem, ...prev].slice(0, MAX_ITEMS))
   }, [])
 
-  const connectionState = useStreamSocket(['decisions'], handleEvent)
+  const connectionState = useStreamSocket(['routing'], handleEvent)
 
   // ── Initial REST seed ────────────────────────────────────────────────────────
 

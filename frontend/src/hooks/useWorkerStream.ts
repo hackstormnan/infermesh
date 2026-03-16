@@ -19,7 +19,8 @@ import {
 } from '../api/mappers/worker.mapper'
 import type { WorkerDto, WorkerStatus } from '../api/types/workers'
 import type { PaginatedData } from '../api/types/common'
-import type { InferMeshStreamEvent, WorkerStreamEvent } from '../api/types/stream'
+import type { InferMeshStreamEvent } from '../api/types/stream'
+import type { WorkerHealth } from '../api/mappers/worker.mapper'
 import { useStreamSocket, type ConnectionState } from './useStreamSocket'
 
 export interface UseWorkerStreamResult {
@@ -37,18 +38,30 @@ export function useWorkerStream(): UseWorkerStreamResult {
   // ── WebSocket event handler ──────────────────────────────────────────────────
 
   const handleEvent = useCallback((event: InferMeshStreamEvent) => {
-    if (event.channel !== 'workers') return
-    const e = event as WorkerStreamEvent
+    if (event.type !== 'workers') return
+    const payload = event.data
 
-    if (e.type === 'worker.evicted') {
-      setWorkers(prev => prev.filter(w => w.id !== e.workerId))
+    // WorkerStreamStatus ('healthy'|'degraded'|'offline') is a simplified
+    // view — map to the closest internal WorkerStatus for display.
+    const streamStatusToWorkerStatus = (s: typeof payload.status): WorkerStatus =>
+      s === 'offline'  ? 'offline'   :
+      s === 'degraded' ? 'draining'  :
+      'idle'
+
+    const streamStatusToHealth = (s: typeof payload.status): WorkerHealth =>
+      s === 'offline'  ? 'offline'  :
+      s === 'degraded' ? 'degraded' :
+      'healthy'
+
+    if (payload.event === 'deregistered') {
+      setWorkers(prev => prev.filter(w => w.id !== payload.workerId))
       return
     }
 
-    if (e.type === 'worker.registered') {
+    if (payload.event === 'registered') {
       // Fetch the full DTO so we have all display fields (name, region, models…)
       apiClient
-        .get<WorkerDto>(`/workers/${e.workerId}`)
+        .get<WorkerDto>(`/workers/${payload.workerId}`)
         .then(dto => {
           const vm = mapWorker(dto)
           setWorkers(prev =>
@@ -61,19 +74,21 @@ export function useWorkerStream(): UseWorkerStreamResult {
       return
     }
 
-    if (e.type === 'worker.heartbeat' || e.type === 'worker.status_changed') {
+    // heartbeat — update live metrics from the payload fields available
+    if (payload.event === 'heartbeat') {
       setWorkers(prev =>
         prev.map(w => {
-          if (w.id !== e.workerId) return w
-          const util =
-            e.maxConcurrentJobs > 0 ? e.activeJobs / e.maxConcurrentJobs : 0
+          if (w.id !== payload.workerId) return w
           return {
             ...w,
-            status: e.status as WorkerStatus,
-            activeJobs: e.activeJobs,
-            maxConcurrentJobs: e.maxConcurrentJobs,
-            utilization: util,
-            jobSlots: `${e.activeJobs} / ${e.maxConcurrentJobs}`,
+            status:           streamStatusToWorkerStatus(payload.status),
+            health:           streamStatusToHealth(payload.status),
+            queuedJobs:       payload.queueSize,
+            utilization:      payload.loadScore ?? w.utilization,
+            loadScore:        payload.loadScore,
+            tokensPerSecond:  payload.throughput ?? w.tokensPerSecond,
+            ttftMs:           payload.latency ?? w.ttftMs,
+            lastHeartbeatAge: 'just now',
           }
         }),
       )

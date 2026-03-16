@@ -113,7 +113,7 @@ export function buildModelsRoute(
               type: "object",
               properties: {
                 success: { type: "boolean" },
-                data: { type: "object" },
+                data: { type: "object", additionalProperties: true },
                 meta: {
                   type: "object",
                   properties: {
@@ -158,7 +158,7 @@ export function buildModelsRoute(
               type: "object",
               properties: {
                 success: { type: "boolean" },
-                data: { type: "object" },
+                data: { type: "object", additionalProperties: true },
                 meta: {
                   type: "object",
                   properties: {

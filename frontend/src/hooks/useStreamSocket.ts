@@ -63,7 +63,7 @@ export function useStreamSocket(
       if (!mountedRef.current) return
       attemptRef.current = 0
       setConnState('connected')
-      const msg: SubscribeMessage = { type: 'subscribe', channels: channelsRef.current }
+      const msg: SubscribeMessage = { action: 'subscribe', channels: channelsRef.current }
       ws.send(JSON.stringify(msg))
     }
 

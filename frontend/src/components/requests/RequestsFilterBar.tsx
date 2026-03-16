@@ -26,6 +26,7 @@ interface RequestsFilterBarProps {
   statusFilter:   RequestStatusFilter
   total:          number
   loading:        boolean
+  error?:         string | null
   onSearchChange: (v: string) => void
   onStatusChange: (v: RequestStatusFilter) => void
   onExport:       () => void
@@ -51,6 +52,7 @@ export function RequestsFilterBar({
   statusFilter,
   total,
   loading,
+  error,
   onSearchChange,
   onStatusChange,
   onExport,
@@ -98,7 +100,7 @@ export function RequestsFilterBar({
           minWidth:   80,
         }}
       >
-        {loading ? 'Loading…' : `${total.toLocaleString()} result${total !== 1 ? 's' : ''}`}
+        {loading ? 'Loading…' : error ? '—' : `${total.toLocaleString()} result${total !== 1 ? 's' : ''}`}
       </span>
 
       {/* Export button (shell — backend endpoint not yet implemented) */}

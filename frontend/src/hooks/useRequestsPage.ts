@@ -11,7 +11,7 @@ import { apiClient, ApiClientError } from '../api/client'
 import { mapRequests, type RequestViewModel } from '../api/mappers/request.mapper'
 import type { InferenceRequestDto, RequestStatus } from '../api/types/requests'
 import type { PaginatedData } from '../api/types/common'
-import type { InferMeshStreamEvent, RequestStreamEvent } from '../api/types/stream'
+import type { InferMeshStreamEvent } from '../api/types/stream'
 import { useStreamSocket, type ConnectionState } from './useStreamSocket'
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -106,39 +106,46 @@ export function useRequestsPage(): UseRequestsPageResult {
   }, [page, debouncedSearch, statusFilter, refetchKey])
 
   // ── WebSocket live updates ──────────────────────────────────────────────────
+  //
+  // The backend sends StreamEnvelope<RequestAcceptedPayload> on the "requests"
+  // channel. Each event represents a newly accepted intake — inject it at the
+  // top of page 1 when filters permit.
+  //
+  // RequestStreamStatus ('pending'|'processing'|'completed'|'failed') is
+  // deliberately decoupled from the internal RequestStatus enum. Map the stream
+  // status to the closest RequestStatus for display:
+  //   pending    → queued       (request accepted, not yet routed)
+  //   processing → dispatched   (worker assigned, execution in flight)
+  //   completed  → completed
+  //   failed     → failed
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const handleEvent = useCallback((event: InferMeshStreamEvent) => {
-    if (event.channel !== 'requests') return
-    const e = event as RequestStreamEvent
+    if (event.type !== 'requests') return
 
-    if (e.type === 'request.created') {
-      // Only inject on page 1 — deeper pages are unaffected by new arrivals
-      if (pageRef.current !== 1) return
-      // Respect active status filter
-      if (statusFilterRef.current !== 'all' && statusFilterRef.current !== e.status) return
+    // Only inject on page 1 — deeper pages are unaffected by new arrivals
+    if (pageRef.current !== 1) return
 
-      const newItem: RequestViewModel = {
-        id:         e.requestId,
-        shortId:    e.requestId.slice(0, 8),
-        modelId:    e.modelId,
-        status:     e.status as RequestStatus,
-        taskType:   'chat',
-        age:        'just now',
-        createdAt:  new Date(e.timestamp),
-        hasRouted:  false,
-      }
-      setRequests(prev => [newItem, ...prev].slice(0, PAGE_LIMIT))
-      setTotal(t => t + 1)
-      return
+    const payload = event.data
+    const reqStatus: RequestStatus =
+      payload.status === 'pending'    ? 'queued'      :
+      payload.status === 'processing' ? 'dispatched'  :
+      payload.status as RequestStatus  // 'completed' | 'failed' match directly
+
+    // Respect active status filter
+    if (statusFilterRef.current !== 'all' && statusFilterRef.current !== reqStatus) return
+
+    const newItem: RequestViewModel = {
+      id:        payload.id,
+      shortId:   payload.id.slice(0, 8),
+      modelId:   payload.model,
+      status:    reqStatus,
+      taskType:  'chat',
+      age:       'just now',
+      createdAt: new Date(payload.timestamp),
+      hasRouted: false,
     }
-
-    if (e.type === 'request.updated') {
-      setRequests(prev =>
-        prev.map(r =>
-          r.id === e.requestId ? { ...r, status: e.status as RequestStatus } : r,
-        ),
-      )
-    }
+    setRequests(prev => [newItem, ...prev].slice(0, PAGE_LIMIT))
+    setTotal(t => t + 1)
   }, []) // stable — reads page/filter via refs
 
   const connectionState = useStreamSocket(['requests'], handleEvent)
