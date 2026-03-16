@@ -27,6 +27,9 @@ export interface WorkerViewModel {
   loadScore?: number
   tokensPerSecond?: number
   ttftMs?: number
+  cpuUsagePercent?: number
+  memoryUsagePercent?: number
+  uptimeSeconds?: number
   /** How long ago the last heartbeat was received */
   lastHeartbeatAge: string
   labels: Record<string, string>
@@ -70,10 +73,13 @@ export function mapWorker(dto: WorkerDto): WorkerViewModel {
     activeJobs: dto.capacity.activeJobs,
     maxConcurrentJobs: dto.capacity.maxConcurrentJobs,
     queuedJobs: dto.capacity.queuedJobs,
-    loadScore: dto.runtimeMetrics.loadScore,
-    tokensPerSecond: dto.runtimeMetrics.tokensPerSecond,
-    ttftMs: dto.runtimeMetrics.ttftMs,
-    lastHeartbeatAge: heartbeatAge(dto.lastHeartbeatAt),
+    loadScore:          dto.runtimeMetrics.loadScore,
+    tokensPerSecond:    dto.runtimeMetrics.tokensPerSecond,
+    ttftMs:             dto.runtimeMetrics.ttftMs,
+    cpuUsagePercent:    dto.runtimeMetrics.cpuUsagePercent,
+    memoryUsagePercent: dto.runtimeMetrics.memoryUsagePercent,
+    uptimeSeconds:      dto.runtimeMetrics.uptimeSeconds,
+    lastHeartbeatAge:   heartbeatAge(dto.lastHeartbeatAt),
     labels: dto.labels,
   }
 }
