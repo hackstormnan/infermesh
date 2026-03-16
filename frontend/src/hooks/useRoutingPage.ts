@@ -12,6 +12,10 @@
  *   - avgDecisionMs   : mean evaluationMs across recent decisions (null if empty)
  *
  * 30 s auto-refresh (faster than models because routing is operational data).
+ *
+ * Stale-data behaviour: if a background refresh fails while data already exists,
+ * we keep the last-good data and set isStale=true rather than collapsing the
+ * policy list into an error banner.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -40,6 +44,9 @@ export interface UseRoutingPageResult {
   stats:           RoutingStats
   loading:         boolean
   error:           string | null
+  /** True when a background refresh failed but last-known-good data is shown */
+  isStale:         boolean
+  lastUpdatedAt:   Date | null
   refetch:         () => void
 }
 
@@ -68,6 +75,8 @@ export function useRoutingPage(): UseRoutingPageResult {
   const [recentDecisions, setRecentDecisions] = useState<RoutingDecisionViewModel[]>([])
   const [loading,         setLoading]         = useState(true)
   const [error,           setError]           = useState<string | null>(null)
+  const [isStale,         setIsStale]         = useState(false)
+  const [lastUpdatedAt,   setLastUpdatedAt]   = useState<Date | null>(null)
   const firstLoad = useRef(true)
 
   const load = useCallback((showLoading: boolean) => {
@@ -81,11 +90,18 @@ export function useRoutingPage(): UseRoutingPageResult {
       .then(([policiesResult, decisionsResult]) => {
         setPolicies(mapRoutingPolicies(policiesResult.items))
         setRecentDecisions(mapRoutingDecisions(decisionsResult.items))
+        setIsStale(false)
+        setLastUpdatedAt(new Date())
         firstLoad.current = false
       })
-      .catch(e =>
-        setError(e instanceof ApiClientError ? e.message : 'Failed to load routing data'),
-      )
+      .catch(e => {
+        if (!firstLoad.current) {
+          // Background refresh failure — keep existing data, mark stale
+          setIsStale(true)
+        } else {
+          setError(e instanceof ApiClientError ? e.message : 'Failed to load routing data')
+        }
+      })
       .finally(() => { if (showLoading) setLoading(false) })
   }, [])
 
@@ -99,5 +115,5 @@ export function useRoutingPage(): UseRoutingPageResult {
 
   const stats = deriveStats(policies, recentDecisions)
 
-  return { policies, recentDecisions, stats, loading, error, refetch }
+  return { policies, recentDecisions, stats, loading, error, isStale, lastUpdatedAt, refetch }
 }

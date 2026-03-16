@@ -18,64 +18,9 @@ import { WorkerCard } from '../components/workers/WorkerCard'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorState } from '../components/ui/ErrorState'
 import { SkeletonBlock } from '../components/ui/LoadingState'
+import { MiniStatCard } from '../components/ui/MiniStatCard'
 import { ConnectionStatusBadge } from '../components/ui/ConnectionStatusBadge'
 import type { WorkerViewModel } from '../api/mappers/worker.mapper'
-
-// ─── Summary card ─────────────────────────────────────────────────────────────
-
-function SummaryCard({
-  label,
-  value,
-  accent,
-  loading,
-}: {
-  label:   string
-  value:   number
-  accent?: string
-  loading: boolean
-}) {
-  return (
-    <div
-      style={{
-        backgroundColor: 'var(--color-bg-surface)',
-        border:          '1px solid var(--color-border)',
-        borderRadius:    'var(--radius-lg)',
-        padding:         '14px 18px',
-        display:         'flex',
-        flexDirection:   'column',
-        gap:             6,
-      }}
-    >
-      <span
-        style={{
-          fontFamily:    'var(--font-mono)',
-          fontSize:      10,
-          fontWeight:    600,
-          letterSpacing: '0.8px',
-          textTransform: 'uppercase',
-          color:         'var(--color-text-muted)',
-        }}
-      >
-        {label}
-      </span>
-      {loading ? (
-        <SkeletonBlock width={48} height={24} />
-      ) : (
-        <span
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontSize:   24,
-            fontWeight: 700,
-            color:      accent ?? 'var(--color-text-primary)',
-            lineHeight: 1,
-          }}
-        >
-          {value}
-        </span>
-      )}
-    </div>
-  )
-}
 
 // ─── Worker skeleton card ─────────────────────────────────────────────────────
 
@@ -168,10 +113,10 @@ export function Workers() {
 
       {/* ── Summary cards ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-        <SummaryCard label="Total"    value={counts.total}    loading={loading} />
-        <SummaryCard label="Healthy"  value={counts.healthy}  loading={loading} accent={counts.healthy  > 0 ? 'var(--color-green)' : undefined} />
-        <SummaryCard label="Degraded" value={counts.degraded} loading={loading} accent={counts.degraded > 0 ? 'var(--color-amber)' : undefined} />
-        <SummaryCard label="Offline"  value={counts.offline}  loading={loading} accent={counts.offline  > 0 ? 'var(--color-red)'   : undefined} />
+        <MiniStatCard label="Total"    value={String(counts.total)}    loading={loading} />
+        <MiniStatCard label="Healthy"  value={String(counts.healthy)}  loading={loading} accent={counts.healthy  > 0 ? 'var(--color-green)' : undefined} />
+        <MiniStatCard label="Degraded" value={String(counts.degraded)} loading={loading} accent={counts.degraded > 0 ? 'var(--color-amber)' : undefined} />
+        <MiniStatCard label="Offline"  value={String(counts.offline)}  loading={loading} accent={counts.offline  > 0 ? 'var(--color-red)'   : undefined} />
       </div>
 
       {/* ── Worker grid ── */}

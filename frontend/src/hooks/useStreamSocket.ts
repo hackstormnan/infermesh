@@ -16,7 +16,7 @@ import type {
   SubscribeMessage,
 } from '../api/types/stream'
 
-export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error'
+export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error'
 
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000]
 
@@ -38,6 +38,9 @@ export function useStreamSocket(
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onEventRef = useRef(onEvent)
   const channelsRef = useRef(channels)
+  // Tracks whether we have ever successfully connected — used to distinguish
+  // "initial connecting" from "reconnecting after a drop"
+  const hasConnectedRef = useRef(false)
 
   useEffect(() => { onEventRef.current = onEvent })
   useEffect(() => { channelsRef.current = channels })
@@ -62,6 +65,7 @@ export function useStreamSocket(
     ws.onopen = () => {
       if (!mountedRef.current) return
       attemptRef.current = 0
+      hasConnectedRef.current = true
       setConnState('connected')
       const msg: SubscribeMessage = { action: 'subscribe', channels: channelsRef.current }
       ws.send(JSON.stringify(msg))
@@ -85,7 +89,9 @@ export function useStreamSocket(
     ws.onclose = () => {
       wsRef.current = null
       if (!mountedRef.current) return
-      setConnState('disconnected')
+      // If we've connected before, show "reconnecting" during the backoff window
+      // so the UI is honest that it's recovering rather than just "disconnected"
+      setConnState(hasConnectedRef.current ? 'reconnecting' : 'disconnected')
       const delay = RECONNECT_DELAYS_MS[
         Math.min(attemptRef.current, RECONNECT_DELAYS_MS.length - 1)
       ]

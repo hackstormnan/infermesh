@@ -9,7 +9,7 @@
  *   - WebSocket stream   "routing" channel             via useDecisionStream
  *
  * Layout:
- *   - Page header + refresh button + WebSocket connection badge
+ *   - Page header + refresh button + stale indicator + WebSocket connection badge
  *   - 4 summary cards (Active Policies / Total Policies / Success Rate / Avg Decision Time)
  *   - Two-column body:
  *       Left  (55 %): scrollable policy list — click to select
@@ -18,7 +18,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { GitBranch, RefreshCw } from 'lucide-react'
+import { GitBranch } from 'lucide-react'
 import { useRoutingPage } from '../hooks/useRoutingPage'
 import { useDecisionStream } from '../hooks/useDecisionStream'
 import { PolicyCard } from '../components/routing/PolicyCard'
@@ -27,67 +27,14 @@ import { Panel, PanelHeader } from '../components/ui/Panel'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorState } from '../components/ui/ErrorState'
 import { SkeletonBlock } from '../components/ui/LoadingState'
+import { MiniStatCard } from '../components/ui/MiniStatCard'
+import { RefreshButton } from '../components/ui/RefreshButton'
+import { StaleBadge } from '../components/ui/StaleBadge'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import { ConnectionStatusBadge } from '../components/ui/ConnectionStatusBadge'
 import { useStreamSocket } from '../hooks/useStreamSocket'
 import type { RoutingPolicyViewModel } from '../api/mappers/routing.mapper'
 import type { InferMeshStreamEvent, RoutingOutcomeSummaryPayload } from '../api/types/stream'
-
-// ─── Summary card ─────────────────────────────────────────────────────────────
-
-function SummaryCard({
-  label,
-  value,
-  accent,
-  loading,
-}: {
-  label:   string
-  value:   string
-  accent?: string
-  loading: boolean
-}) {
-  return (
-    <div
-      style={{
-        backgroundColor: 'var(--color-bg-surface)',
-        border:          '1px solid var(--color-border)',
-        borderRadius:    'var(--radius-lg)',
-        padding:         '14px 18px',
-        display:         'flex',
-        flexDirection:   'column',
-        gap:             6,
-      }}
-    >
-      <span
-        style={{
-          fontFamily:    'var(--font-mono)',
-          fontSize:      10,
-          fontWeight:    600,
-          letterSpacing: '0.8px',
-          textTransform: 'uppercase',
-          color:         'var(--color-text-muted)',
-        }}
-      >
-        {label}
-      </span>
-      {loading ? (
-        <SkeletonBlock width={52} height={24} />
-      ) : (
-        <span
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontSize:   24,
-            fontWeight: 700,
-            color:      accent ?? 'var(--color-text-primary)',
-            lineHeight: 1,
-          }}
-        >
-          {value}
-        </span>
-      )}
-    </div>
-  )
-}
 
 // ─── Policy list skeleton ─────────────────────────────────────────────────────
 
@@ -370,7 +317,7 @@ function DecisionRow({ decision }: { decision: DecisionViewModel }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function Routing() {
-  const { policies, recentDecisions, stats, loading, error, refetch } = useRoutingPage()
+  const { policies, recentDecisions, stats, loading, error, isStale, lastUpdatedAt, refetch } = useRoutingPage()
 
   const {
     decisions:   liveDecisions,
@@ -465,49 +412,26 @@ export function Routing() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <StaleBadge isStale={isStale} lastUpdatedAt={lastUpdatedAt} />
           <ConnectionStatusBadge state={connectionState} />
-          <button
-            onClick={refetch}
-            disabled={loading}
-            style={{
-              display:         'flex',
-              alignItems:      'center',
-              gap:             6,
-              padding:         '5px 12px',
-              borderRadius:    'var(--radius-md)',
-              backgroundColor: 'var(--color-bg-elevated)',
-              border:          '1px solid var(--color-border-strong)',
-              fontFamily:      'var(--font-mono)',
-              fontSize:        11,
-              color:           'var(--color-text-muted)',
-              cursor:          loading ? 'not-allowed' : 'pointer',
-              opacity:         loading ? 0.5 : 1,
-            }}
-          >
-            <RefreshCw
-              size={11}
-              strokeWidth={2}
-              style={loading ? { animation: 'spin 1s linear infinite' } : undefined}
-            />
-            Refresh
-          </button>
+          <RefreshButton onClick={refetch} loading={loading} />
         </div>
       </div>
 
       {/* ── Summary cards ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-        <SummaryCard
+        <MiniStatCard
           label="Active Policies"
           value={String(stats.activePolicies)}
           loading={loading}
           accent={stats.activePolicies > 0 ? 'var(--color-green)' : undefined}
         />
-        <SummaryCard
+        <MiniStatCard
           label="Total Policies"
           value={String(stats.totalPolicies)}
           loading={loading}
         />
-        <SummaryCard
+        <MiniStatCard
           label="Success Rate"
           value={stats.successRate != null ? `${stats.successRate}%` : '—'}
           loading={loading}
@@ -518,7 +442,7 @@ export function Routing() {
             : undefined
           }
         />
-        <SummaryCard
+        <MiniStatCard
           label="Avg Decision"
           value={stats.avgDecisionMs != null ? `${stats.avgDecisionMs}ms` : '—'}
           loading={loading}
@@ -638,11 +562,6 @@ export function Routing() {
           </div>
         )}
       </Panel>
-
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-      `}</style>
     </div>
   )
 }

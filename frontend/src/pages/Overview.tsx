@@ -3,6 +3,7 @@ import { Panel, PanelHeader } from '../components/ui/Panel'
 import { ChartPlaceholder, LineChartPlaceholder } from '../components/ui/ChartPlaceholder'
 import { SkeletonBlock } from '../components/ui/LoadingState'
 import { ErrorState } from '../components/ui/ErrorState'
+import { StaleBadge } from '../components/ui/StaleBadge'
 import { RequestStreamPanel } from '../components/overview/RequestStreamPanel'
 import { RoutingDecisionPanel } from '../components/overview/RoutingDecisionPanel'
 import { WorkerStatusPanel } from '../components/overview/WorkerStatusPanel'
@@ -48,10 +49,12 @@ function halfTrend(
 
 export function Overview() {
   const {
-    data: stats,
-    loading: statsLoading,
-    error: statsError,
-    refetch: refetchStats,
+    data:          stats,
+    loading:       statsLoading,
+    error:         statsError,
+    isStale:       statsStale,
+    lastUpdatedAt: statsUpdatedAt,
+    refetch:       refetchStats,
   } = useSummaryStats()
   const { data: timeSeries } = useTimeSeriesMetrics('1h')
   const { requests, loading: reqLoading, connectionState: reqConn } = useRequestStream()
@@ -131,6 +134,11 @@ export function Overview() {
           gap: 12,
         }}
       >
+        {statsStale && (
+          <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+            <StaleBadge isStale={statsStale} lastUpdatedAt={statsUpdatedAt} />
+          </div>
+        )}
         {statsError ? (
           <div style={{ gridColumn: '1 / -1' }}>
             <ErrorState

@@ -6,76 +6,23 @@
  * Data: REST poll (GET /api/v1/models) via useModelsPage — 60 s auto-refresh.
  *
  * Layout:
- *   - Page header with refresh button
+ *   - Page header with refresh button + stale indicator
  *   - 4 summary cards (Active / Providers / Frontier / Avg TTFT)
  *   - Model card grid (3-column)
  *   - Usage comparison panel — latency vs cost bars built from registry data
  */
 
-import { Box, RefreshCw } from 'lucide-react'
+import { Box } from 'lucide-react'
 import { useModelsPage } from '../hooks/useModelsPage'
 import { ModelCard } from '../components/models/ModelCard'
 import { Panel, PanelHeader } from '../components/ui/Panel'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorState } from '../components/ui/ErrorState'
 import { SkeletonBlock } from '../components/ui/LoadingState'
+import { MiniStatCard } from '../components/ui/MiniStatCard'
+import { RefreshButton } from '../components/ui/RefreshButton'
+import { StaleBadge } from '../components/ui/StaleBadge'
 import type { ModelViewModel } from '../api/mappers/model.mapper'
-
-// ─── Summary card ─────────────────────────────────────────────────────────────
-
-function SummaryCard({
-  label,
-  value,
-  accent,
-  loading,
-}: {
-  label:   string
-  value:   string
-  accent?: string
-  loading: boolean
-}) {
-  return (
-    <div
-      style={{
-        backgroundColor: 'var(--color-bg-surface)',
-        border:          '1px solid var(--color-border)',
-        borderRadius:    'var(--radius-lg)',
-        padding:         '14px 18px',
-        display:         'flex',
-        flexDirection:   'column',
-        gap:             6,
-      }}
-    >
-      <span
-        style={{
-          fontFamily:    'var(--font-mono)',
-          fontSize:      10,
-          fontWeight:    600,
-          letterSpacing: '0.8px',
-          textTransform: 'uppercase',
-          color:         'var(--color-text-muted)',
-        }}
-      >
-        {label}
-      </span>
-      {loading ? (
-        <SkeletonBlock width={56} height={24} />
-      ) : (
-        <span
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontSize:   24,
-            fontWeight: 700,
-            color:      accent ?? 'var(--color-text-primary)',
-            lineHeight: 1,
-          }}
-        >
-          {value}
-        </span>
-      )}
-    </div>
-  )
-}
 
 // ─── Model card skeleton ──────────────────────────────────────────────────────
 
@@ -227,7 +174,7 @@ function UsageComparisonPanel({ models }: { models: ModelViewModel[] }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function Models() {
-  const { models, loading, error, refetch } = useModelsPage()
+  const { models, loading, error, isStale, lastUpdatedAt, refetch } = useModelsPage()
   const stats = deriveStats(models)
 
   return (
@@ -269,39 +216,18 @@ export function Models() {
           </p>
         </div>
 
-        <button
-          onClick={refetch}
-          disabled={loading}
-          style={{
-            display:         'flex',
-            alignItems:      'center',
-            gap:             6,
-            padding:         '5px 12px',
-            borderRadius:    'var(--radius-md)',
-            backgroundColor: 'var(--color-bg-elevated)',
-            border:          '1px solid var(--color-border-strong)',
-            fontFamily:      'var(--font-mono)',
-            fontSize:        11,
-            color:           'var(--color-text-muted)',
-            cursor:          loading ? 'not-allowed' : 'pointer',
-            opacity:         loading ? 0.5 : 1,
-          }}
-        >
-          <RefreshCw
-            size={11}
-            strokeWidth={2}
-            style={loading ? { animation: 'spin 1s linear infinite' } : undefined}
-          />
-          Refresh
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <StaleBadge isStale={isStale} lastUpdatedAt={lastUpdatedAt} />
+          <RefreshButton onClick={refetch} loading={loading} />
+        </div>
       </div>
 
       {/* ── Summary cards ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-        <SummaryCard label="Active"    value={String(stats.active)}    loading={loading} accent={stats.active   > 0 ? 'var(--color-green)'  : undefined} />
-        <SummaryCard label="Providers" value={String(stats.providers)} loading={loading} />
-        <SummaryCard label="Frontier"  value={String(stats.frontier)}  loading={loading} accent={stats.frontier > 0 ? 'var(--color-purple)' : undefined} />
-        <SummaryCard label="Avg TTFT"  value={stats.avgTtft > 0 ? `${stats.avgTtft}ms` : '—'} loading={loading} />
+        <MiniStatCard label="Active"    value={String(stats.active)}    loading={loading} accent={stats.active   > 0 ? 'var(--color-green)'  : undefined} />
+        <MiniStatCard label="Providers" value={String(stats.providers)} loading={loading} />
+        <MiniStatCard label="Frontier"  value={String(stats.frontier)}  loading={loading} accent={stats.frontier > 0 ? 'var(--color-purple)' : undefined} />
+        <MiniStatCard label="Avg TTFT"  value={stats.avgTtft > 0 ? `${stats.avgTtft}ms` : '—'} loading={loading} />
       </div>
 
       {/* ── Model grid ── */}
@@ -334,8 +260,6 @@ export function Models() {
       {!loading && !error && models.length > 0 && (
         <UsageComparisonPanel models={models} />
       )}
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

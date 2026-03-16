@@ -73,3 +73,7 @@ body {
 /* ─── Resets ─────────────────────────────────────────────────────────────────── */
 button { cursor: pointer; border: none; background: none; font: inherit; color: inherit; padding: 0; }
 a      { color: inherit; text-decoration: none; }
+
+/* ─── Global animations ──────────────────────────────────────────────────────── */
+@keyframes spin  { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
