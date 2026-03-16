@@ -266,6 +266,7 @@ All responses use a consistent JSON envelope:
 
 | Document | Contents |
 |---|---|
+| [docs/engineering.md](docs/engineering.md) | Engineering deep dive — system design, routing algorithm, simulation isolation, frontend architecture |
 | [docs/demo.md](docs/demo.md) | Step-by-step backend API demo walkthrough with copy-paste commands |
 | [docs/screenshots.md](docs/screenshots.md) | Frontend dashboard screenshot gallery |
 | [docs/api-examples.md](docs/api-examples.md) | Copy-paste curl examples for every route + WebSocket subscription |
