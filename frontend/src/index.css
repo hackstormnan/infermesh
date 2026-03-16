@@ -1,0 +1,75 @@
+/* ─── Design tokens ──────────────────────────────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --color-bg-base:     #0A0B0E;
+  --color-bg-surface:  #111318;
+  --color-bg-elevated: #161921;
+  --color-bg-sidebar:  #0D0F14;
+
+  /* Borders */
+  --color-border:        #1B1E29;
+  --color-border-strong: #252A38;
+
+  /* Text */
+  --color-text-primary:   #ECEEF1;
+  --color-text-secondary: #7A7E90;
+  --color-text-muted:     #454859;
+
+  /* Accent palette */
+  --color-blue:       #3B82F6;
+  --color-blue-dim:   rgba(59, 130, 246, 0.10);
+  --color-green:      #22C55E;
+  --color-green-dim:  rgba(34, 197, 94, 0.10);
+  --color-amber:      #F59E0B;
+  --color-amber-dim:  rgba(245, 158, 11, 0.10);
+  --color-purple:     #8B5CF6;
+  --color-purple-dim: rgba(139, 92, 246, 0.10);
+  --color-red:        #EF4444;
+  --color-red-dim:    rgba(239, 68, 68, 0.10);
+
+  /* Typography */
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono:    'Roboto Mono', 'Courier New', monospace;
+  --font-body:    'Inter', system-ui, sans-serif;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+/* ─── Reset ──────────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar          { width: 4px; height: 4px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: var(--color-border-strong); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+
+/* ─── Resets ─────────────────────────────────────────────────────────────────── */
+button { cursor: pointer; border: none; background: none; font: inherit; color: inherit; padding: 0; }
+a      { color: inherit; text-decoration: none; }
